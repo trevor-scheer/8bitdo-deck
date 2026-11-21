@@ -1,6 +1,6 @@
 # Wireless firmware update investigation
 
-Investigated on 2026-11-21. **The Ultimate 2 Wireless controller has a real update channel through its USB receiver.** A read-only firmware identity query and application-memory read succeeded over that channel on Steam Deck. A separate direct USB receiver checksum query also succeeded. Receiver 1.01 also entered USB recovery, and production `wait_for_boot` opened its interface under SteamOS’s existing policy without sending USB reports. Boot GET_PID/reset and the recovery round trip remain **unverified**. No firmware image erase, write, or commit was sent. Native installation remains disabled; all hardware qualification and source-reviewed authorization registries are empty.
+Investigated on 2026-11-21. **The Ultimate 2 Wireless controller has a real update channel through its USB receiver.** A read-only firmware identity query and application-memory read succeeded over that channel on Steam Deck. A separate direct USB receiver checksum query also succeeded. Receiver 1.01 also completed a bounded recovery round trip with production helpers: boot identity and source inspection, one reset, and return to unchanged firmware on the same USB port. Pending-image copy, power-loss recovery, and actual firmware installation remain untested. No firmware image erase, write, or commit was sent. Native installation remains disabled; all hardware qualification and source-reviewed authorization registries are empty.
 
 ## Live results
 
@@ -97,7 +97,7 @@ These findings describe mechanisms for retrying an interrupted copy; they do not
 
 The separate [Ultimate 2 receiver recovery helper](receiver-recovery.md) checks boot identity, reviewed bootloader bytes, metadata, and installed or staged firmware before allowing one reset. Reset can cause the vendor bootloader to install a pending image; it is not universally read-only. Its simulated tests establish host gating, not hardware recovery.
 
-The receiver running 1.01 reached USB `2dc8:3208` with the expected unnumbered 64-byte descriptor. An initial `EACCES` prevented boot GET_PID/reset. Later, production `wait_for_boot` opened it as the desktop user under SteamOS’s existing policy, checked its original physical port and report layout, and sent no USB reports. The project’s scoped rules and receipt were absent. The earlier failure’s cause remains unknown; it does not establish a missing OS policy, and neither administrator setup nor a physical power cycle is required for access. Boot target verification and return to runtime remain untested. Private dumps and disassembly are not distributed.
+The receiver running 1.01 completed boot entry to `2dc8:3208`, production `wait_for_boot`, and `inspect_recovery` checks of PID `6013`, its full bootloader and source application, and erased nonpending metadata. After a second check that metadata was entirely `FF`, one reset returned it to stable 1.01 on the original USB port. The application fingerprint and all 52 metadata bytes remained unchanged. The test used SteamOS’s existing policy without permission changes and sent no `C1`, erase, write, or commit. It did not exercise a pending-image copy. See the [bounded hardware evidence](receiver-recovery.md#bounded-hardware-validation); private dumps and disassembly are not distributed.
 
 ## Bluetooth possibilities
 
@@ -109,6 +109,6 @@ For the original Ultimate Bluetooth 80NA, the [official legacy Android APK](http
 
 ## Validation still required
 
-Source-reviewed experimental authorization and hardware qualification are separate evidence levels; neither registry contains an enabled record. With boot access established, complete the receiver’s boot identity, reset, and runtime version checks before claiming a recovery round trip. Wireless installation additionally needs its own reviewed transport and recovery path, full radio transfer, error handling, commit, reconnect identity, and normal controller-operation checks. A successful direct receiver query does not establish those behaviors.
+Source-reviewed experimental authorization and hardware qualification are separate evidence levels; neither registry contains an enabled record. The completed receiver round trip establishes return to an unchanged source image, not pending-image activation or interrupted-update recovery. Wireless installation additionally needs its own reviewed transport and recovery path, full radio transfer, error handling, commit, reconnect identity, and normal controller-operation checks. A successful direct receiver query does not establish those behaviors.
 
 Keep receiver and controller firmware separate, and do not extend results to another receiver version or controller family without evidence. An experimental update must remain labeled as such until hardware evidence supports a `FlashQualification`.

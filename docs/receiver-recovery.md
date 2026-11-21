@@ -2,7 +2,7 @@
 
 `eightbitdo.recovery` inspects the Ultimate 2 Wireless receiver (`6013`) in its USB bootloader and can request one reset after verifying its state. It does not initialize, erase, write, or commit firmware. **Resetting a verified pending update causes the vendor bootloader to copy staged firmware into the application area.** The helper returns a result that still requires reconnect verification.
 
-This is source-reviewed experimental support, not a hardware-validated recovery procedure. The receiver reached the expected USB boot personality. Although the initial check failed with `EACCES`, production `wait_for_boot` later opened it as the desktop user using SteamOS’s existing policy, verified the original USB port and report layout, and sent no USB reports. No project rules or receipt were installed. The earlier failure’s cause remains unknown. Boot GET_PID/reset, a completed recovery round trip, and interrupted-update recovery have not been demonstrated. The plugin exposes a recovery check and separately confirmed recovery action for eligible interrupted install jobs. All authorization registries remain empty, so this build enables no recovery jobs.
+This is source-reviewed experimental support. A bounded receiver 1.01 round trip passed with production helpers: boot identity and source inspection, one reset, and return to the unchanged application on the same USB port. Firmware installation, pending-image copy, and power-loss recovery remain untested. The plugin exposes a recovery check and separately confirmed action for eligible interrupted install jobs. All authorization registries remain empty, so this build enables no recovery jobs.
 
 ## Service and plugin flow
 
@@ -37,6 +37,18 @@ For a pending update, the helper requires all of these conditions:
 4. The destination image satisfies the reviewed product, layout, extent, and additive-checksum constraints.
 
 An erased factory record or a valid nonpending record permits reset only when the installed application matches either the reviewed source fingerprint or the exact authorized target image and passes the boot checksum checks. Otherwise inspection returns `blocked`. Malformed metadata, an unknown bootloader, a different target, or changed staging bytes cannot authorize reset.
+
+## Bounded hardware validation
+
+Receiver 1.01 completed this check using production helpers, a lock on its original USB port, and SteamOS’s existing access policy. No rules were installed and no administrator authorization or permission change was needed.
+
+1. Read and fingerprint the complete `0x5000`-byte bootloader and `0x7500`-byte installed application. Production `C3` and complete 4096-byte readback verification also passed against existing staging bytes at `0x14000`, including the final two-byte read.
+2. Send the vendor boot-entry report beginning `81 05 00 51 00`. Production `wait_for_boot` opened the same port’s `3208` interface and checked its report layout.
+3. Run `inspect_recovery`: verify boot firmware PID `6013`, the full bootloader and source application, and the nonpending 52-byte metadata record containing only `FF` bytes.
+4. Recheck that metadata remained entirely `FF`, then send reset `07` once. Production `wait_for_application` verified stable version 1.01 on the same port.
+5. Recheck the source application SHA-256 and metadata after return. The 29,952 application bytes and all 52 metadata bytes were unchanged.
+
+No `C1`, erase, write, or commit was sent. This demonstrates a return to an unchanged source image with no pending update; it does not validate the pending-copy path, interrupted-write recovery, or the complete update worker. An earlier `EACCES` had an unknown cause and did not establish a missing SteamOS access policy. Private dumps and disassembly are not distributed.
 
 ## Wire format and evidence
 

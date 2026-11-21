@@ -65,7 +65,7 @@ For an eligible failed or blocked source-reviewed Ultimate 2 receiver install, *
 
 If inspection permits reset, the plugin offers **Confirm receiver recovery**. This explicit confirmation starts a background worker that repeats all checks, resets once if still required and permitted, and verifies the receiver on the same port. Reset may cause the vendor bootloader to install an already committed image. Returning to the original version leaves the update incomplete; a timeout does not trigger another reset. Keep USB and power connected.
 
-All authorization registries remain empty, so this build enables no recovery jobs. The initial hardware check reached the expected recovery USB identity and descriptor, but `EACCES` prevented GET_PID and reset. A later nonprivileged open succeeded under the existing SteamOS policy, without installing rules. The earlier failure does not establish a missing OS policy; its exact cause remains unknown. Boot GET_PID/reset and a completed recovery round trip have not yet been demonstrated. See the [recovery contract and evidence limits](receiver-recovery.md).
+All authorization registries remain empty, so this build enables no recovery jobs. A bounded hardware check on receiver 1.01 completed boot identity, inspection, one reset, and return to the unchanged source version on the same USB port. It used SteamOS’s existing access policy without administrator setup or permission changes. No firmware initialization, erase, write, or commit was sent. This does not validate pending-image copy or recovery from power loss; see the [recovery contract and evidence limits](receiver-recovery.md).
 
 ## Diagnose or remove the plugin
 
