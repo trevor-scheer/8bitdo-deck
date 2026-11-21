@@ -10,6 +10,24 @@ from eightbitdo.access import RecoveryAccess, RULE_TEXT, _trusted_text, recovery
 
 
 class RecoveryAccessTests(unittest.TestCase):
+    def test_steamos_existing_policy_needs_no_installer_or_receipt(self):
+        policy = '''# USB devices and topological children
+SUBSYSTEMS=="usb", TAG+="uaccess"
+# HID devices over hidraw
+KERNEL=="hidraw*", TAG+="uaccess"
+# Steam Controller udev write access
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+'''
+        def trusted_text(path):
+            return policy if str(path) == '/usr/lib/udev/rules.d/70-steam-jupiter-input.rules' else None
+        with patch('eightbitdo.access._trusted_text', side_effect=trusted_text), \
+                patch('eightbitdo.access.os.path.lexists', side_effect=lambda p: str(p).startswith('/usr/lib/')), \
+                patch('subprocess.Popen') as spawn:
+            access = RecoveryAccess(Path('/unused'))
+            self.assertTrue(access.status()['configured'])
+            self.assertTrue(access.setup()['configured'])
+            spawn.assert_not_called()
+
     def test_installer_and_readiness_use_identical_scoped_rules(self):
         script = (Path(__file__).resolve().parent.parent / 'scripts/install-udev-rules.sh').read_text()
         embedded = script.split("<<'RULES'\n", 1)[1].split('\nRULES\n', 1)[0] + '\n'
