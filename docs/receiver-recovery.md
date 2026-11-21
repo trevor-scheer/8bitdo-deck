@@ -2,9 +2,19 @@
 
 `eightbitdo.recovery` inspects the Ultimate 2 Wireless receiver (`6013`) in its USB bootloader and can request one reset after verifying its state. It does not initialize, erase, write, or commit firmware. **Resetting a verified pending update causes the vendor bootloader to copy staged firmware into the application area.** The helper returns a result that still requires reconnect verification.
 
-This is source-reviewed experimental support, not a hardware-validated recovery procedure. The observed recovery test reached the expected USB boot personality and descriptor, but Linux denied access before the boot identity query or reset. A completed recovery roundtrip and interrupted-update recovery have not been demonstrated. The helper does not add an authorization record or expose a UI action.
+This is source-reviewed experimental support, not a hardware-validated recovery procedure. The observed recovery test reached the expected USB boot personality and descriptor, but Linux denied access before the boot identity query or reset. A completed recovery roundtrip and interrupted-update recovery have not been demonstrated. The plugin exposes a recovery check and separately confirmed recovery action for eligible interrupted install jobs. All authorization registries remain empty, so this build enables no recovery jobs.
 
-## Preconditions and interface
+## Service and plugin flow
+
+Recovery is limited to failed or blocked Ultimate 2 receiver install jobs that previously entered the source-reviewed experimental install path. A prepared download, arbitrary boot device, legacy receiver, or hardware qualification record is not eligible. The service requires the recorded original USB port and source version, the unchanged destination image in its validated cache, and a matching developer-issued `SourceReviewedAuthorization` still present in the compiled registry. UI arguments cannot supply that authorization.
+
+- `check_recovery(job_id)`, shown as **Check interrupted update**, takes the update/device locks and reads the receiver on its recorded port. In application mode it checks the firmware version; in boot mode it calls `inspect_recovery`. It never changes mode or resets.
+- After a check permits reset, **Confirm receiver recovery** calls `recover_update(job_id, confirmed=True)`. This starts a background worker with suspend inhibition. The worker repeats the job, image, authorization, port, and device-state checks before calling `finish_recovery`; an earlier successful check cannot bypass reinspection.
+- After reset, the worker checks the same receiver's runtime identity and version. The target version completes the job. Returning to the original version leaves the update blocked as incomplete. A timeout stays blocked; reset is not retried.
+
+Recovery access must already be configured through the [normal administrator setup](install.md#receiver-recovery-access). The service requires boot USB PID `3208`, the reviewed report layout, and verified firmware PID `6013`; a shared USB PID alone is insufficient. Recovery does not request a mode transition or begin a new firmware transfer.
+
+## Protocol helper interface
 
 The caller must hold the update and device locks, prevent suspend, and bind the boot HID node to the original physical USB port. Verify the reviewed unnumbered 64-byte report descriptor and obtain access before requesting any mode transition. A shared USB boot PID alone does not identify the firmware target.
 
