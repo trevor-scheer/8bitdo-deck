@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import struct
 import unittest
@@ -170,7 +171,7 @@ class LegacyProtocolTests(unittest.TestCase):
 
     def test_reset_queries_target_without_initialize_or_commit(self):
         transport = QueueTransport([reply(8, b"\x08\x60"), reply(7)])
-        reset_receiver_boot(transport, usb_pid=0x3208)
+        self.assertTrue(reset_receiver_boot(transport, usb_pid=0x3208))
         self.assertEqual(transport.sent, [build_boot_command(8, length=2, total_length=2), build_boot_command(7)])
         self.assertEqual(transport.reports, [], "Reset must drain its ACK before the caller closes HID")
         wrong = QueueTransport([reply(8, b"\x13\x30")])
@@ -184,6 +185,7 @@ class LegacyProtocolTests(unittest.TestCase):
             (reply(8), ProtocolError),
             (reply(7, status=1), ProtocolError),
             (OSError("The device disconnected."), OSError),
+            (OSError(errno.EACCES, "permission denied"), OSError),
         ):
             with self.subTest(response=response):
                 transport = QueueTransport([reply(8, b"\x08\x60"), response])
@@ -192,6 +194,35 @@ class LegacyProtocolTests(unittest.TestCase):
                 self.assertEqual(transport.sent, [
                     build_boot_command(8, length=2, total_length=2), build_boot_command(7),
                 ])
+
+    def test_reset_disconnect_after_send_requires_application_verification(self):
+        for code in (errno.EIO, errno.ENODEV, errno.ENXIO):
+            with self.subTest(errno=code):
+                transport = QueueTransport([reply(8, b"\x08\x60"), OSError(code, "disconnected")])
+                self.assertFalse(reset_receiver_boot(transport, usb_pid=0x3208))
+                self.assertEqual(transport.reports, [])
+                self.assertEqual(transport.sent, [
+                    build_boot_command(8, length=2, total_length=2), build_boot_command(7),
+                ])
+
+    def test_reset_disconnect_during_target_query_is_not_accepted(self):
+        transport = QueueTransport([OSError(errno.EIO, "disconnected")])
+        with self.assertRaises(OSError):
+            reset_receiver_boot(transport, usb_pid=0x3208)
+        self.assertEqual(len(transport.sent), 1)
+
+    def test_reset_send_disconnect_is_not_accepted_or_retried(self):
+        class SendFailure(QueueTransport):
+            def send(self, report):
+                super().send(report)
+                if report == build_boot_command(7):
+                    raise OSError(errno.EIO, "send failed")
+
+        transport = SendFailure([reply(8, b"\x08\x60"), reply(7)])
+        with self.assertRaises(OSError):
+            reset_receiver_boot(transport, usb_pid=0x3208)
+        self.assertEqual(transport.sent.count(build_boot_command(7)), 1)
+        self.assertEqual(transport.reports, [reply(7)])
 
     def test_plan_preserves_prefix_and_uses_relative_offsets(self):
         image = firmware()
@@ -242,6 +273,7 @@ class LegacyProtocolTests(unittest.TestCase):
             (reply(8), ProtocolError),
             (reply(7, status=1), ProtocolError),
             (OSError("The device disconnected."), OSError),
+            (OSError(errno.EACCES, "permission denied"), OSError),
         ):
             with self.subTest(response=response):
                 class ResetFailureDevice(ReceiverDevice):
@@ -258,6 +290,36 @@ class LegacyProtocolTests(unittest.TestCase):
                 self.assertEqual(device.commands.count(7), 1)
                 self.assertEqual(device.commands[-1], 7)
                 self.assertEqual(device.commands.count(0xC2), 1)
+
+    def test_flash_reset_disconnect_still_requires_reconnect_verification(self):
+        image = firmware()
+        for code in (errno.EIO, errno.ENODEV, errno.ENXIO):
+            with self.subTest(errno=code):
+                class DisconnectedResetDevice(ReceiverDevice):
+                    def receive(self, timeout):
+                        if self.commands[-1] == 7:
+                            raise OSError(code, "disconnected")
+                        return super().receive(timeout)
+
+                device = DisconnectedResetDevice(image)
+                result = self.flash(device, image)
+                self.assertTrue(result.needs_reconnect_verification)
+                self.assertEqual(device.commands.count(7), 1)
+                self.assertEqual(device.commands[-1], 7)
+
+    def test_flash_reset_send_disconnect_is_not_accepted_or_retried(self):
+        class SendFailureDevice(ReceiverDevice):
+            def send(self, report):
+                super().send(report)
+                if self.commands[-1] == 7:
+                    raise OSError(errno.EIO, "send failed")
+
+        image = firmware()
+        device = SendFailureDevice(image)
+        with self.assertRaises(OSError):
+            self.flash(device, image)
+        self.assertEqual(device.commands.count(7), 1)
+        self.assertNotEqual(device.received_commands[-1], 7)
 
     def experimental_authorization(self, image):
         prefix = image.payload[:INITIALIZATION.image_offset]
