@@ -1,0 +1,66 @@
+import hashlib
+import stat
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from eightbitdo.access import RecoveryAccess, RULE_TEXT, _trusted_text, recovery_access_configured
+
+
+class RecoveryAccessTests(unittest.TestCase):
+    def test_installer_and_readiness_use_identical_scoped_rules(self):
+        script = (Path(__file__).resolve().parent.parent / 'scripts/install-udev-rules.sh').read_text()
+        embedded = script.split("<<'RULES'\n", 1)[1].split('\nRULES\n', 1)[0] + '\n'
+        self.assertEqual(embedded, RULE_TEXT)
+        self.assertEqual(RULE_TEXT.count('ATTRS{idVendor}=="2dc8"'), 2)
+        for pid in ('3208', '3002'):
+            self.assertIn(f'ATTRS{{idProduct}}=="{pid}"', RULE_TEXT)
+        self.assertNotIn('0666', RULE_TEXT)
+
+    def test_rule_without_completed_install_receipt_is_not_ready(self):
+        digest = hashlib.sha256(RULE_TEXT.encode()).hexdigest() + '\n'
+        for texts, expected in [([RULE_TEXT, None], False), ([RULE_TEXT, 'wrong'], False),
+                                ([RULE_TEXT, digest], True), (['different', digest], False)]:
+            with self.subTest(texts=texts), patch('eightbitdo.access._trusted_text', side_effect=texts):
+                self.assertEqual(recovery_access_configured(), expected)
+
+    def test_non_root_writable_and_symlink_rules_are_untrusted(self):
+        path = Mock(spec=Path)
+        path.read_text.return_value = RULE_TEXT
+        for uid, mode in [(1000, stat.S_IFREG | 0o644), (0, stat.S_IFREG | 0o664),
+                          (0, stat.S_IFLNK | 0o777)]:
+            path.lstat.return_value = SimpleNamespace(st_uid=uid, st_mode=mode)
+            self.assertIsNone(_trusted_text(path))
+        path.read_text.assert_not_called()
+        path.lstat.return_value = SimpleNamespace(st_uid=0, st_mode=stat.S_IFREG | 0o644)
+        self.assertEqual(_trusted_text(path), RULE_TEXT)
+
+    def test_setup_uses_normal_authorization_and_does_not_duplicate_pending_prompt(self):
+        with tempfile.TemporaryDirectory() as root, \
+                patch('eightbitdo.access.recovery_access_configured', return_value=False), \
+                patch('shutil.which', return_value='/usr/bin/pkexec'), \
+                patch('subprocess.Popen') as spawn:
+            spawn.return_value.poll.return_value = None
+            access = RecoveryAccess(Path(root))
+            self.assertTrue(access.setup()['pending'])
+            self.assertTrue(access.setup()['pending'])
+            spawn.assert_called_once()
+            command = spawn.call_args.args[0]
+            self.assertEqual(command[:3], ['/usr/bin/pkexec', '--disable-internal-agent', '/bin/bash'])
+            self.assertTrue(command[3].endswith('/scripts/install-udev-rules.sh'))
+
+    def test_declined_authorization_stays_unconfigured(self):
+        with patch('eightbitdo.access.recovery_access_configured', return_value=False):
+            access = RecoveryAccess(Path('/unused'))
+            access._process = Mock(returncode=126)
+            access._process.poll.return_value = 126
+            status = access.status()
+        self.assertFalse(status['configured'])
+        self.assertFalse(status['pending'])
+        self.assertIn('authorization did not complete', status['message'])
+
+
+if __name__ == '__main__':
+    unittest.main()

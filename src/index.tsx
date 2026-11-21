@@ -2,8 +2,8 @@ import { definePlugin } from "@decky/api";
 import { ButtonItem, DropdownItem, PanelSection, PanelSectionRow, staticClasses } from "@decky/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Device, Job, Model, Release, exportDiagnostics, getJob, getModels, getReleases,
-  installUpdate, openOfficialUpdater, prepareUpdate, scanDevices,
+  Device, Job, Model, RecoveryAccess, Release, exportDiagnostics, getJob, getModels, getReleases,
+  getRecoveryAccess, installUpdate, openOfficialUpdater, prepareUpdate, scanDevices, setupRecoveryAccess,
 } from "./api";
 
 const LAST_JOB = "8bitdo-deck:last-job";
@@ -39,6 +39,65 @@ function saveJob(id: string) {
     if (id) localStorage.setItem(LAST_JOB, id);
     else localStorage.removeItem(LAST_JOB);
   } catch { /* The current job remains usable when browser storage is unavailable. */ }
+}
+
+function RecoveryAccessSettings({ disabled }: { disabled: boolean }) {
+  const alive = useRef(true);
+  const [access, setAccess] = useState<RecoveryAccess | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    alive.current = true;
+    void getRecoveryAccess().then((result) => {
+      if (alive.current) setAccess(result);
+    }).catch((reason: unknown) => {
+      if (alive.current) setError(`Could not check recovery access: ${errorMessage(reason)}`);
+    });
+    return () => { alive.current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!access?.pending) return;
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const result = await getRecoveryAccess();
+        if (cancelled) return;
+        setAccess(result);
+        if (result.pending) timeout = setTimeout(() => { void poll(); }, 1000);
+      } catch (reason) {
+        if (!cancelled) {
+          setAccess(null);
+          setError(`Could not check recovery access: ${errorMessage(reason)}. Reopen the plugin to check again.`);
+        }
+      }
+    };
+    timeout = setTimeout(() => { void poll(); }, 1000);
+    return () => { cancelled = true; clearTimeout(timeout); };
+  }, [access?.pending]);
+
+  return <>
+    <p role="status" style={textStyle}>{access?.message ?? (error ? "" : "Checking receiver recovery access…")}</p>
+    {!access?.configured && <PanelSectionRow>
+      <ButtonItem
+        layout="below"
+        description="Opens SteamOS administrator authorization. Does not write firmware."
+        disabled={disabled || starting || !access?.can_setup || access.pending}
+        onClick={() => {
+          setStarting(true);
+          setError("");
+          void setupRecoveryAccess().then((result) => {
+            if (alive.current) setAccess(result);
+          }).catch((reason: unknown) => {
+            if (alive.current) setError(`Could not set up recovery access: ${errorMessage(reason)}`);
+          }).finally(() => { if (alive.current) setStarting(false); });
+        }}
+      >Set up receiver recovery</ButtonItem>
+    </PanelSectionRow>}
+    {error && <p role="alert" style={textStyle}>{error}</p>}
+  </>;
 }
 
 function Content() {
@@ -257,6 +316,7 @@ function Content() {
       {job.target_label && <p style={{ ...textStyle, fontWeight: "bold" }}>{job.target_label}</p>}
       <p style={textStyle}>{job.message}</p>
       <progress aria-label="Update progress" value={Math.max(0, Math.min(100, job.progress))} max={100} style={{ width: "100%" }} />
+      {job.evidence_level === "source-reviewed-experimental" && <p style={textStyle}>Experimental update: the protocol has been reviewed, but a complete update has not yet been validated on hardware.</p>}
       {job.can_install && !confirmInstall && <PanelSectionRow>
         <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => setConfirmInstall(true)}>Review installation</ButtonItem>
       </PanelSectionRow>}
@@ -279,6 +339,7 @@ function Content() {
     </PanelSection>}
 
     <PanelSection title="Other update options">
+      <RecoveryAccessSettings disabled={busy || jobActive} />
       <p style={textStyle}>8BitDo’s web updater supports some models, but currently has no update path for the Ultimate Bluetooth receiver. USB access may need setup in Desktop Mode.</p>
       <PanelSectionRow>
         <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {

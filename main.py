@@ -24,6 +24,12 @@ class Plugin:
     async def get_models(self):
         return await asyncio.to_thread(self.service.get_models)
 
+    async def get_recovery_access(self):
+        return await asyncio.to_thread(self.service.get_recovery_access)
+
+    async def setup_recovery_access(self):
+        return await asyncio.to_thread(self.service.setup_recovery_access)
+
     async def get_releases(self, model_id: str):
         return await asyncio.to_thread(self.service.get_releases, model_id)
 

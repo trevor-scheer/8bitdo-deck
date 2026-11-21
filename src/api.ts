@@ -36,6 +36,15 @@ export interface Job {
   message: string;
   can_install: boolean;
   target_label?: string;
+  evidence_level?: string;
+  evidence?: string;
+}
+
+export interface RecoveryAccess {
+  configured: boolean;
+  pending: boolean;
+  can_setup: boolean;
+  message: string;
 }
 
 export const scanDevices = callable<[], { devices: Device[]; warnings: string[] }>("scan_devices");
@@ -50,3 +59,5 @@ export const getJob = callable<[jobId: string], Job>("get_job");
 export const installUpdate = callable<[jobId: string], Job>("install_update");
 export const exportDiagnostics = callable<[], { path?: string; error?: string }>("export_diagnostics");
 export const openOfficialUpdater = callable<[], { opened: boolean; error?: string }>("open_official_updater");
+export const getRecoveryAccess = callable<[], RecoveryAccess>("get_recovery_access");
+export const setupRecoveryAccess = callable<[], RecoveryAccess>("setup_recovery_access");

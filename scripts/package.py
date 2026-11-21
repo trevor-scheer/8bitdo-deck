@@ -13,7 +13,7 @@ import zipfile
 
 PACKAGE_NAME = "8bitdo-deck"
 FIXED_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
-REQUIRED_FILES = ("package.json", "plugin.json", "main.py", "eightbitdo/__init__.py", "dist/index.js")
+REQUIRED_FILES = ("package.json", "plugin.json", "main.py", "eightbitdo/__init__.py", "dist/index.js", "scripts/install-udev-rules.sh")
 DECKY_API_MATERIALS = (
     "THIRD_PARTY_NOTICES.md", "third_party/licenses/decky-api-LGPL-2.1.txt", "third_party/licenses/tslib.txt",
     "third_party/decky-api/LICENSE", "third_party/decky-api/README.md", "third_party/decky-api/package.json",

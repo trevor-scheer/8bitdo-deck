@@ -58,6 +58,8 @@ async function mount(t) {
   const state = {
     devices: [unknown, receiver], scanOverride: null,
     releaseModels: [], prepareCalls: [], installCalls: [], jobs: new Map(), nativeReady: false,
+    evidenceLevel: undefined, recoveryChecks: 0, recoverySetupCalls: 0, recoveryError: null,
+    recoveryAccess: { configured: false, pending: false, can_setup: true, message: "Recovery access needs setup." },
   };
   handlers = {
     scan_devices: async () => state.scanOverride ?? { devices: state.devices, warnings: [] },
@@ -73,6 +75,7 @@ async function mount(t) {
         id, state: state.nativeReady ? "ready" : "blocked", progress: 100,
         message: state.nativeReady ? "Ready to install." : "Native flash unverified.",
         can_install: state.nativeReady, target_label: "Ultimate 2 receiver firmware 1.05",
+        evidence_level: state.evidenceLevel,
       });
       return { job_id: id };
     },
@@ -85,6 +88,16 @@ async function mount(t) {
     },
     export_diagnostics: async () => ({ path: "/tmp/diagnostics.json" }),
     open_official_updater: async () => ({ opened: true }),
+    get_recovery_access: async () => {
+      state.recoveryChecks++;
+      if (state.recoveryError) throw state.recoveryError;
+      return state.recoveryAccess;
+    },
+    setup_recovery_access: async () => {
+      state.recoverySetupCalls++;
+      state.recoveryAccess = { ...state.recoveryAccess, pending: true, message: "Approve the SteamOS administrator prompt." };
+      return state.recoveryAccess;
+    },
   };
   let renderer;
   await settle(() => { renderer = TestRenderer.create(plugin().content); });
@@ -97,7 +110,8 @@ async function mount(t) {
     assert.equal(Boolean(item.props.disabled), false, `Button is disabled: ${label}`);
     await settle(() => item.props.onClick());
   };
-  return { state, receiverModel, controllerModel, unknown, receiver, button, modelPicker, click };
+  const renderedText = () => JSON.stringify(renderer.toJSON());
+  return { state, receiverModel, controllerModel, unknown, receiver, button, modelPicker, click, renderedText };
 }
 
 test("identified devices automatically select and load firmware, while rescans reconcile identity", async (t) => {
@@ -153,16 +167,57 @@ test("manual browsing does not identify hardware or enable an unsupported write"
 });
 
 test("a qualified target still requires explicit installation confirmation", async (t) => {
-  const { state, receiverModel, receiver, button, click } = await mount(t);
+  const { state, receiverModel, receiver, button, click, renderedText } = await mount(t);
   state.nativeReady = true;
   await click("Prepare firmware");
   assert.deepEqual(state.prepareCalls, [[receiver.id, receiverModel.id, "r1"]]);
   assert.equal(button("Confirm firmware installation"), undefined);
   assert.deepEqual(state.installCalls, []);
+  assert.ok(!renderedText().includes("Experimental update:"));
 
   await click("Review installation");
   assert.ok(button("Confirm firmware installation"));
   assert.deepEqual(state.installCalls, []);
   await click("Confirm firmware installation");
   assert.deepEqual(state.installCalls, ["job-1"]);
+});
+
+test("receiver recovery setup polls authorization to completion without writing firmware", async (t) => {
+  const { state, button, click, renderedText } = await mount(t);
+  assert.equal(state.recoveryChecks, 1, "Recovery status is checked on mount");
+  await click("Set up receiver recovery");
+  assert.equal(state.recoverySetupCalls, 1);
+  assert.equal(button("Set up receiver recovery").props.disabled, true);
+  assert.ok(renderedText().includes("Approve the SteamOS administrator prompt."));
+
+  state.recoveryAccess = { configured: true, pending: false, can_setup: true, message: "Recovery USB access configured." };
+  await settle(() => new Promise((resolve) => setTimeout(resolve, 1100)));
+  assert.equal(state.recoveryChecks, 2);
+  assert.equal(button("Set up receiver recovery"), undefined);
+  assert.ok(renderedText().includes("Recovery USB access configured."));
+  assert.deepEqual(state.prepareCalls, []);
+  assert.deepEqual(state.installCalls, []);
+});
+
+test("recovery polling errors stop pending setup and remain visible", async (t) => {
+  const { state, button, click, renderedText } = await mount(t);
+  await click("Set up receiver recovery");
+  state.recoveryError = new Error("Backend unavailable");
+  await settle(() => new Promise((resolve) => setTimeout(resolve, 1100)));
+  assert.ok(renderedText().includes("Could not check recovery access: Backend unavailable"));
+  assert.equal(button("Set up receiver recovery").props.disabled, true);
+  assert.deepEqual(state.installCalls, []);
+});
+
+test("experimental evidence is disclosed before review and still requires confirmation", async (t) => {
+  const { state, button, click, renderedText } = await mount(t);
+  state.nativeReady = true;
+  state.evidenceLevel = "source-reviewed-experimental";
+  await click("Prepare firmware");
+  assert.ok(renderedText().includes("Experimental update: the protocol has been reviewed, but a complete update has not yet been validated on hardware."));
+  assert.ok(button("Review installation"));
+  assert.equal(button("Confirm firmware installation"), undefined);
+  await click("Review installation");
+  assert.ok(button("Confirm firmware installation"));
+  assert.deepEqual(state.installCalls, []);
 });

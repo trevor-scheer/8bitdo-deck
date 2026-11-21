@@ -78,4 +78,5 @@ class JobStore:
 def public_job(job: dict) -> dict:
     return {key: job[key] for key in (
         "id", "state", "progress", "message", "can_install", "target_label",
+        "evidence_level", "evidence",
     ) if key in job}

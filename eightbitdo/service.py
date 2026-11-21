@@ -9,10 +9,11 @@ import time
 from pathlib import Path
 
 from .catalog import Catalog
+from .access import RecoveryAccess
 from .discovery import Device, clean_text, discover, inspect_device
 from .fwupd import Fwupd, FwupdError
 from .jobs import ACTIVE_STATES, JobStore, default_state_dir, public_job
-from .protocol import flash_application, parse_firmware, query_identity
+from .protocol import flash_application, parse_firmware, query_identity, verify_authorization_sources
 from .qualifications import qualification_for
 from .registry import MODELS, get_model
 from .transport import HidrawTransport
@@ -27,6 +28,13 @@ class Service:
         self.store = JobStore(self.state_dir)
         self.catalog = catalog if catalog is not None else Catalog()
         self.fwupd = fwupd if fwupd is not None else Fwupd()
+        self.recovery_access = RecoveryAccess(self.state_dir)
+
+    def get_recovery_access(self) -> dict:
+        return self.recovery_access.status()
+
+    def setup_recovery_access(self) -> dict:
+        return self.recovery_access.setup()
 
     def _devices(self, probe: bool = True) -> tuple[list[Device], list[str]]:
         devices = discover()
@@ -176,6 +184,8 @@ class Service:
             job = self.store.read(job_id)
             if job["state"] != "ready" or not job["can_install"] or job.get("backend") not in {"fwupd", "hid"}:
                 raise ValueError("This firmware is not qualified for installation. No firmware was written.")
+            if job.get("backend") == "hid" and not self.recovery_access.status()['configured']:
+                raise ValueError("Configure receiver recovery access before installing firmware.")
             job.update(state="queued", can_install=False, progress=0, message="Starting the confirmed update. Keep the device connected.")
             self._spawn(job, "install")
             return public_job(job)
@@ -220,9 +230,15 @@ class Service:
             device = self._native_device(job["device_id"], model.id)
             with HidrawTransport(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
                 identity = query_identity(transport, usb_pid=int(device.pid, 16))
-            if qualification_for(image, identity) is not None:
-                job.update(state="ready", can_install=True, original_version=identity.version,
-                           message="The image matches a hardware qualification record. Review the target and version before installing.")
+                authorization = qualification_for(image, identity)
+                if authorization is not None:
+                    job.update(evidence_level=authorization.evidence_level, evidence=authorization.evidence)
+                    if self.recovery_access.status()['configured']:
+                        verify_authorization_sources(transport, image, identity=identity, qualification=authorization)
+                        job.update(state="ready", can_install=True, original_version=identity.version,
+                                   message="Firmware and device checks passed. Review the target, evidence level, and version before installing.")
+                    else:
+                        job['message'] = 'Firmware verified. Set up receiver recovery access, then prepare this update again.'
         self.store.save(job)
 
     def run_install(self, job: dict) -> None:
@@ -270,14 +286,18 @@ class Service:
         image = parse_firmware(data, expected_pid=model.firmware_pid)
         if image.version != job["version"]:
             raise ValueError("The firmware version changed after preparation.")
+        if not self.recovery_access.status()['configured']:
+            raise ValueError("Configure receiver recovery access before installing firmware.")
         device = self._native_device(job["device_id"], model.id)
         with HidrawTransport(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
             identity = query_identity(transport, usb_pid=int(device.pid, 16))
             qualification = qualification_for(image, identity)
             if qualification is None or identity.version != job.get("original_version"):
                 raise ValueError("The target or its hardware qualification changed. Prepare the update again.")
+            if job.get('evidence_level') != qualification.evidence_level:
+                raise ValueError("The update evidence changed. Prepare and review the update again.")
             job.update(state="installing", progress=0, can_install=False,
-                       message="Installing the qualified image. Keep the device connected.")
+                       message="Installing the reviewed image. Keep the device connected.")
             self.store.save(job)
 
             def progress(stage: str, done: int, total: int) -> None:

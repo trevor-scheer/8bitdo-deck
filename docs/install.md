@@ -33,6 +33,18 @@ The [Decky developer settings implementation](https://github.com/SteamDeckHomebr
 
 The plugin runs as the desktop user and does not request Decky's root flag. It does not disable SteamOS's read-only system partition or install broad USB permission rules. Native fwupd operations use the system service and may require authorization under its policy. If a HID device cannot be opened, the plugin reports that limitation instead of changing system permissions.
 
+### Receiver recovery access
+
+Before enabling a receiver update, configure access to its recovery USB interface. Select **Set up receiver recovery** and approve the normal SteamOS administrator prompt. If Gaming Mode cannot show that prompt, switch to Desktop Mode and run the packaged installer:
+
+```sh
+bash ~/homebrew/plugins/8bitdo-deck/scripts/install-udev-rules.sh
+```
+
+The installer asks for administrator authorization through `pkexec`. It adds two udev rules for USB vendor `2dc8`, recovery products `3208` and `3002`, granting access to the active local user. It does not grant access to every USB device, run the plugin as root, or change firmware. The plugin checks the root-owned rules and installation receipt before permitting a reviewed native update. Actual recovery-mode checks remain device-specific.
+
+To remove these rules, run the same installer with `--uninstall`, then reconnect the receivers. Removing the Decky plugin alone does not remove system permission rules.
+
 ## Prepare and install firmware
 
 The plugin automatically selects the first identified component and loads its matching firmware releases. If multiple components are connected, you can select another one from the device list. Controller and receiver firmware are separate. Manual model browsing remains available, but choosing a model manually does not prove that it matches attached hardware.

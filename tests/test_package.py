@@ -16,6 +16,8 @@ class PackageTests(unittest.TestCase):
     def make_project(self, root: Path):
         (root / "eightbitdo").mkdir()
         (root / "dist").mkdir()
+        (root / "scripts").mkdir()
+        (root / "scripts/install-udev-rules.sh").write_text("#!/bin/bash\nexit 0\n")
         (root / "package.json").write_text(json.dumps({"name": "8bitdo-deck"}))
         (root / "plugin.json").write_text(json.dumps({"name": "8BitDo Deck"}))
         (root / "eightbitdo/__init__.py").write_text("")

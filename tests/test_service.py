@@ -161,8 +161,27 @@ class ServiceTests(unittest.TestCase):
         image_path = directory / "image.dat"
         image_path.write_bytes(self.image)
         job = self.service.store.create("usb-" + "a" * 16, "ultimate2-receiver", "release1")
-        job.update(backend="hid", artifact_path=str(image_path), sha256=hashlib.sha256(self.image).hexdigest(), version="1.06", original_version="1.05")
+        job.update(backend="hid", artifact_path=str(image_path), sha256=hashlib.sha256(self.image).hexdigest(), version="1.06", original_version="1.05", evidence_level="hardware-validated")
+        self.service.recovery_access.status = Mock(return_value={'configured': True})
         return job
+
+    def test_missing_recovery_access_stops_native_update_before_device_io(self):
+        job = self.native_job()
+        self.service.recovery_access.status.return_value = {'configured': False}
+        with patch('eightbitdo.service.HidrawTransport') as transport:
+            with self.assertRaisesRegex(ValueError, 'recovery access'):
+                self.service.run_install(job)
+        transport.assert_not_called()
+
+    def test_native_confirmation_rechecks_recovery_access_before_worker(self):
+        job = self.native_job()
+        job.update(state='ready', can_install=True)
+        self.service.store.save(job)
+        self.service.recovery_access.status.return_value = {'configured': False}
+        with patch.object(self.service, '_spawn') as spawn:
+            with self.assertRaisesRegex(ValueError, 'recovery access'):
+                self.service.install_update(job['id'])
+        spawn.assert_not_called()
 
     def test_default_qualification_registry_enables_no_native_writes(self):
         image = parse_firmware(self.image)
