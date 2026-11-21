@@ -1,6 +1,6 @@
 # Install 8BitDo Deck
 
-8BitDo Deck is an early development build. It can discover devices, browse official firmware, prepare updates, and open the official web updater. Legacy installation through fwupd requires a supported 8BitDo device already in bootloader mode and a unique, trusted upgrade release. Native writes remain disabled because all developer authorization registries are empty. Experimental source-reviewed authorization is distinct from a demonstrated hardware qualification; see the [protocol requirements](protocol.md#authorization-and-hardware-qualification).
+8BitDo Deck is an early development build. It can discover devices, browse official firmware, prepare updates, and open the official web updater. Legacy installation through fwupd requires a supported 8BitDo device already in bootloader mode and a unique, trusted upgrade release. One source-reviewed experimental native update is enabled after matching preflight: Ultimate 2 Wireless receiver stable 1.01 to the exact reviewed official 1.06 image. Native controller, wireless, and legacy updates remain blocked. No native update is hardware-qualified; see the [protocol requirements](protocol.md#authorization-and-hardware-qualification).
 
 ## Get the plugin
 
@@ -53,11 +53,24 @@ The plugin automatically selects the first identified component and loads its ma
 
 **Prepare firmware** does not write to a device. For vendor firmware it downloads and validates the image. For fwupd it prepares a trusted release plan; fwupd downloads and validates the firmware when installation begins.
 
-The plugin offers **Review installation** only when the backend authorizes the prepared update. Native jobs require a matching developer-issued authorization and verified recovery access. Review the target, version, and evidence level, then select **Confirm firmware installation**. A source-reviewed experimental update has not been hardware-qualified. Keep the USB connection and power stable until the plugin reports verification complete. Background jobs continue when the sidebar closes; reopening the plugin restores their status. Update workers run in transient user services outside Decky’s service. Do not restart Decky or SteamOS during installation; surviving a Decky restart has not been validated. After a worker interruption, the app requires checking the device rather than retrying automatically.
+The plugin offers **Review installation** only when the backend authorizes the prepared update. Native jobs require a matching developer-issued authorization and verified recovery access. Review the target, version, and evidence level, then select **Confirm firmware installation**. A source-reviewed experimental update has not been hardware-qualified. Keep the USB connection and power stable until the plugin reports verification complete.
+
+Background jobs continue when the sidebar closes; reopening the plugin restores their status. Update workers run in transient user services outside Decky’s service. A benign live check verified worker launch and suspend inhibition without accessing hardware. Do not restart Decky or SteamOS during installation; surviving a Decky restart has not been validated. After a worker interruption, the app requires checking the device rather than retrying automatically.
 
 The fwupd route preserves the system service's authorization and configured reporting policies. A device whose identity changes after leaving the bootloader may need a manual rescan; the app does not declare success solely because the install command exited successfully.
 
 **Open official updater** launches the vendor website in the Google Chrome Flatpak installed through Discover. Website support varies by model: the Ultimate Bluetooth receiver (`6008`) appears in its firmware catalog but has no update route in the inspected web implementation. This button is not a validated fallback for every detected device. Chrome's USB access and any vendor-specific connection instructions may need setup in Desktop Mode; the plugin does not automatically change those permissions. A validated firmware download with a blocked installation state is not a completed device update.
+
+### First experimental receiver update
+
+Only the Ultimate 2 Wireless receiver running stable 1.01 has a source-reviewed authorization. Its complete bootloader and installed application must match the compiled fingerprints, and the destination must be the exact reviewed official 1.06 image. An unreported board revision is constrained by those code fingerprints and verified firmware PID `6013`; the version label alone is insufficient.
+
+1. Keep the receiver connected to the Deck by USB and scan devices. Select **Ultimate 2 Wireless receiver** reporting **1.01**, not its paired controller or the original Ultimate Bluetooth receiver.
+2. Select official firmware **1.06** and choose **Prepare firmware**. Preparation verifies the image, target, source fingerprints, and recovery access. A mismatch keeps installation blocked.
+3. Choose **Review installation** and read the source-reviewed experimental evidence and target/version details. The unchanged-firmware recovery round trip passed; first installation, pending-image copy, and power-loss recovery remain untested.
+4. To perform the update, select **Confirm firmware installation**. Keep USB and power connected until the plugin verifies the returning receiver’s version. Check normal controller/receiver operation afterward.
+
+Preparation does not start the update. The user’s final confirmation does. No hardware qualification or legacy source-reviewed record is enabled, and this authorization does not permit controller updates, radio firmware writes, other source versions, or a different image.
 
 ### Check an interrupted Ultimate 2 receiver update
 
@@ -65,7 +78,7 @@ For an eligible failed or blocked source-reviewed Ultimate 2 receiver install, *
 
 If inspection permits reset, the plugin offers **Confirm receiver recovery**. This explicit confirmation starts a background worker that repeats all checks, resets once if still required and permitted, and verifies the receiver on the same port. Reset may cause the vendor bootloader to install an already committed image. Returning to the original version leaves the update incomplete; a timeout does not trigger another reset. Keep USB and power connected.
 
-All authorization registries remain empty, so this build enables no recovery jobs. A bounded hardware check on receiver 1.01 completed boot identity, inspection, one reset, and return to the unchanged source version on the same USB port. It used SteamOS’s existing access policy without administrator setup or permission changes. No firmware initialization, erase, write, or commit was sent. This does not validate pending-image copy or recovery from power loss; see the [recovery contract and evidence limits](receiver-recovery.md).
+The single 1.01 → 1.06 experimental authorization can support recovery only after an eligible install attempt; it does not enable recovery for an arbitrary attached device. A bounded hardware check on receiver 1.01 completed boot identity, inspection, one reset, and return to the unchanged source version on the same USB port. It used SteamOS’s existing access policy without administrator setup or permission changes. No firmware initialization, erase, write, or commit was sent. This does not validate pending-image copy or recovery from power loss; see the [recovery contract and evidence limits](receiver-recovery.md).
 
 ## Diagnose or remove the plugin
 

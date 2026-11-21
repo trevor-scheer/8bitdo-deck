@@ -2,7 +2,7 @@
 
 `eightbitdo.recovery` inspects the Ultimate 2 Wireless receiver (`6013`) in its USB bootloader and can request one reset after verifying its state. It does not initialize, erase, write, or commit firmware. **Resetting a verified pending update causes the vendor bootloader to copy staged firmware into the application area.** The helper returns a result that still requires reconnect verification.
 
-This is source-reviewed experimental support. A bounded receiver 1.01 round trip passed with production helpers: boot identity and source inspection, one reset, and return to the unchanged application on the same USB port. Firmware installation, pending-image copy, and power-loss recovery remain untested. The plugin exposes a recovery check and separately confirmed action for eligible interrupted install jobs. All authorization registries remain empty, so this build enables no recovery jobs.
+This is source-reviewed experimental support. A bounded receiver 1.01 round trip passed with production helpers: boot identity and source inspection, one reset, and return to the unchanged application on the same USB port. Firmware installation, pending-image copy, and power-loss recovery remain untested. The plugin exposes a recovery check and separately confirmed action for eligible interrupted install jobs. One source-reviewed receiver 1.01 → exact official 1.06 authorization is enabled. Recovery eligibility still requires a previously attempted install with that authorization; hardware qualification and legacy authorization registries remain empty.
 
 ## Service and plugin flow
 
@@ -48,7 +48,7 @@ Receiver 1.01 completed this check using production helpers, a lock on its origi
 4. Recheck that metadata remained entirely `FF`, then send reset `07` once. Production `wait_for_application` verified stable version 1.01 on the same port.
 5. Recheck the source application SHA-256 and metadata after return. The 29,952 application bytes and all 52 metadata bytes were unchanged.
 
-No `C1`, erase, write, or commit was sent. This demonstrates a return to an unchanged source image with no pending update; it does not validate the pending-copy path, interrupted-write recovery, or the complete update worker. An earlier `EACCES` had an unknown cause and did not establish a missing SteamOS access policy. Private dumps and disassembly are not distributed.
+No `C1`, erase, write, or commit was sent. This demonstrates a return to an unchanged source image with no pending update; it does not validate the pending-copy path, interrupted-write recovery, or a complete firmware installation. A separate benign live check verified worker launch through the systemd user manager with suspend inhibition. An earlier `EACCES` had an unknown cause and did not establish a missing SteamOS access policy. Private dumps and disassembly are not distributed.
 
 ## Wire format and evidence
 
