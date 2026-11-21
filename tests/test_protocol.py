@@ -21,6 +21,7 @@ def product_reply(pid=0x6013):
 def firmware(pid=0x6013, size=96):
     payload = bytearray((i % 251 for i in range(size)))
     payload[8:12] = b"KNLT"
+    struct.pack_into("<H", payload, 28, pid)
     return struct.pack("<7I", 107, 0x5000, size, pid, 0, 0, 0) + payload
 
 
@@ -42,10 +43,10 @@ class FlashDevice:
     """An application-mode fake; successful tests are not hardware qualification."""
 
     def __init__(self, size=96, fail_command=None, bad_readback=False, wrong_offset=False, bad_crc=False,
-                 pid=0x6013, bad_readback_offset=0):
+                 pid=0x6013, bad_readback_offset=0, bad_sum=False, block_size=4096, bad_echo=None):
         self.pid = pid
         self.staging_base = {0x6012: 0x32000, 0x6013: 0x13000}[pid]
-        self.memory = bytearray(self.staging_base + size)
+        self.memory = bytearray(self.staging_base + ((size + 4095) // 4096) * 4096)
         self.sent = []
         self.reply = None
         self.fail_command = fail_command
@@ -53,6 +54,9 @@ class FlashDevice:
         self.bad_readback_offset = bad_readback_offset
         self.wrong_offset = wrong_offset
         self.bad_crc = bad_crc
+        self.bad_sum = bad_sum
+        self.block_size = block_size
+        self.bad_echo = bad_echo
 
     def send(self, report):
         self.sent.append(report)
@@ -63,27 +67,36 @@ class FlashDevice:
             return
         status = 1 if command == self.fail_command else 0
         data = b""
+        response_length = length
         if command == 8:
             data = struct.pack("<H", self.pid)
-        if command == 4:
+            response_length = total = 2
+        if command == 0xC1 and not status:
+            # The two middle words are uninitialized in the device handler.
+            data = struct.pack("<IIII", 0, 0x12345678, 0x87654321, self.block_size)
+        if command == 4 and not status:
             start = self.staging_base + offset
-            self.memory[start:start + total] = b"\xff" * total
-        if command == 3:
+            self.memory[start:start + 4096] = b"\xff" * 4096
+        if command == 3 and not status:
             assert crc16(payload) == checksum
             start = self.staging_base + offset
             self.memory[start:start + length] = payload
-        if command == 0xC3:
+        if command == 0xC3 and not status:
             start, count, block = struct.unpack("<III", payload)
             assert block == 4096
             start += self.staging_base
-            data = struct.pack("<H", crc16(self.memory[start:start + count]) ^ int(self.bad_crc))
-        if command == 5:
+            checked = self.memory[start:start + ((count >> 7) & 0x7F) * 128]
+            data = struct.pack("<HI", crc16(checked) ^ int(self.bad_crc), sum(checked) ^ int(self.bad_sum))
+        if command == 5 and not status:
             data = bytes(self.memory[offset:offset + length])
             if self.bad_readback and offset == self.staging_base + self.bad_readback_offset:
                 data = bytes([data[0] ^ 1]) + data[1:]
         response_offset = offset + 1 if self.wrong_offset and command == 3 else offset
+        response_header = [status, command, response_length, checksum, total, response_offset]
+        if self.bad_echo and command == self.bad_echo[0]:
+            response_header[self.bad_echo[1]] ^= 1
         self.reply = (
-            b"\x02\x05" + struct.pack("<HHHHII", status, command, len(data), 0, total, response_offset) + data
+            b"\x02\x05" + struct.pack("<HHHHII", *response_header) + data
         ).ljust(64, b"\0")
 
     def receive(self, timeout):
@@ -226,6 +239,91 @@ class ProtocolTests(unittest.TestCase):
             with self.assertRaises(ProtocolError):
                 parse_command_reply(report)
 
+    def test_reply_payload_sizes_follow_command_not_echoed_length(self):
+        cases = [
+            (0xC1, 0, struct.pack("<IIII", 0, 0x12345678, 0x87654321, 4096)),
+            (0xC3, 12, struct.pack("<HI", 0x1234, 0x56789)),
+            (3, 46, b""), (4, 0, b""), (0xC4, 8, b""),
+        ]
+        for command, length, payload in cases:
+            with self.subTest(command=command):
+                report = (b"\x02\x05" + struct.pack("<HHHHII", 0, command, length, 0, 0, 0)
+                          + payload).ljust(64, b"\0")
+                reply = parse_command_reply(report)
+                self.assertEqual(reply.length, length)
+                self.assertEqual(reply.payload, payload)
+
+    def test_checksum_and_init_replies_reject_invalid_lengths_and_short_payloads(self):
+        for command, length, available in [(0xC1, 0, 15), (0xC3, 12, 5),
+                                            (0xC1, 1, 46), (0xC3, 6, 46), (0xC3, 47, 46)]:
+            with self.subTest(command=command, length=length, available=available):
+                report = b"\x02\x05" + struct.pack("<HHHHII", 0, command, length, 0, 0, 0)
+                with self.assertRaises(ProtocolError):
+                    parse_command_reply(report + bytes(available))
+
+    def test_quantized_checksum_preserves_exact_partial_block_readback(self):
+        for pid in (0x6012, 0x6013):
+            for size in (96, 128, 255, 4096, 4225):
+                with self.subTest(pid=pid, size=size):
+                    image = parse_firmware(firmware(pid=pid, size=size))
+                    transport = FlashDevice(pid=pid, size=size)
+                    result = flash_application(transport, image, identity=DeviceIdentity(pid, 106),
+                                               qualification=qualification(image))
+                    reads = [struct.unpack_from("<HHHHII", report, 2)
+                             for report in transport.sent if report[2:4] == b"\x05\0"]
+                    self.assertEqual(sum(header[2] for header in reads), size)
+                    self.assertEqual(result.bytes_verified, size)
+                    self.assertEqual(transport.commands[-2:], [0xC4, 7])
+
+    def test_additive_checksum_failure_stops_before_readback_or_commit(self):
+        image = parse_firmware(firmware(size=255))
+        transport = FlashDevice(size=255, bad_sum=True)
+        with self.assertRaisesRegex(ProtocolError, "checksum verification"):
+            flash_application(transport, image, identity=DeviceIdentity(0x6013, 106),
+                              qualification=qualification(image))
+        self.assertNotIn(5, transport.commands)
+        self.assertNotIn(0xC4, transport.commands)
+        self.assertNotIn(7, transport.commands)
+
+    def test_initialization_block_size_and_rejection_stop_before_erase(self):
+        for kwargs in ({"block_size": 2048}, {"fail_command": 0xC1}):
+            with self.subTest(kwargs=kwargs):
+                image = parse_firmware(firmware())
+                transport = FlashDevice(**kwargs)
+                with self.assertRaises(ProtocolError):
+                    flash_application(transport, image, identity=DeviceIdentity(0x6013, 106),
+                                      qualification=qualification(image))
+                self.assertEqual(transport.commands, [8, 0x2100, 0xC1])
+
+    def test_changed_echoed_headers_abort_without_reset(self):
+        for command in (0xC1, 4, 3, 0xC3, 5, 0xC4):
+            for field in (2, 3, 4, 5):
+                with self.subTest(command=command, field=field):
+                    image = parse_firmware(firmware())
+                    transport = FlashDevice(bad_echo=(command, field))
+                    with self.assertRaises(ProtocolError):
+                        flash_application(transport, image, identity=DeviceIdentity(0x6013, 106),
+                                          qualification=qualification(image))
+                    self.assertEqual(transport.commands[-1], command)
+                    self.assertNotIn(7, transport.commands)
+                    if command != 0xC4:
+                        self.assertNotIn(0xC4, transport.commands)
+
+    def test_image_geometry_and_embedded_target_fail_before_io(self):
+        cases = [(0x6012, 0x2C001, None), (0x6013, 0xC001, None),
+                 (0x6012, 96, 0x6013), (0x6013, 96, 0x6012)]
+        for pid, size, embedded_pid in cases:
+            with self.subTest(pid=pid, size=size, embedded_pid=embedded_pid):
+                encoded = bytearray(firmware(pid=pid, size=size))
+                if embedded_pid is not None:
+                    struct.pack_into("<H", encoded, 28 + 28, embedded_pid)
+                image = parse_firmware(bytes(encoded))
+                transport = FlashDevice(pid=pid, size=size)
+                with self.assertRaises(ProtocolError):
+                    flash_application(transport, image, identity=DeviceIdentity(pid, 106),
+                                      qualification=qualification(image))
+                self.assertEqual(transport.sent, [])
+
     def test_flash_transaction_verifies_before_commit(self):
         for pid, staging_base in [(0x6012, 0x32000), (0x6013, 0x13000)]:
             with self.subTest(pid=pid):
@@ -236,7 +334,8 @@ class ProtocolTests(unittest.TestCase):
                     transport, image, identity=DeviceIdentity(pid, 106), qualification=qualification(image),
                     progress=lambda *values: progress.append(values),
                 )
-                self.assertEqual(transport.memory[staging_base:], image.payload)
+                self.assertEqual(transport.memory[staging_base:staging_base + 4150], image.payload)
+                self.assertEqual(transport.memory[staging_base + 4150:], b"\xff" * (8192 - 4150))
                 self.assertEqual(transport.memory[:staging_base], bytes(staging_base))
                 writes = [struct.unpack_from("<I", report, 14)[0]
                           for report in transport.sent if report[2:4] == b"\x03\0"]
@@ -247,7 +346,9 @@ class ProtocolTests(unittest.TestCase):
                 self.assertEqual(reads, [staging_base + offset for offset in logical_offsets])
                 self.assertEqual(transport.commands.count(4), 2)
                 self.assertEqual(transport.commands.count(0xC3), 2)
+                self.assertEqual(transport.commands[:3], [8, 0x2100, 0xC1])
                 self.assertEqual(transport.commands[-2:], [0xC4, 7])
+                self.assertEqual(struct.unpack_from("<HHHHII", transport.sent[-2], 2)[4:], (8, 0))
                 self.assertTrue(result.needs_reconnect_verification)
                 self.assertEqual(result.bytes_verified, 4150)
                 self.assertEqual(progress[-1], ("restarting", 4150, 4150))
@@ -272,7 +373,7 @@ class ProtocolTests(unittest.TestCase):
         transport = FlashDevice(fail_command=3)
         with self.assertRaises(ProtocolError):
             flash_application(transport, image, identity=DeviceIdentity(0x6013, 106), qualification=qualification(image))
-        self.assertEqual(transport.commands, [8, 0x2100, 4, 3])
+        self.assertEqual(transport.commands, [8, 0x2100, 0xC1, 4, 3])
 
     def test_readback_failure_never_commits(self):
         for pid in (0x6012, 0x6013):
@@ -324,7 +425,7 @@ class ProtocolTests(unittest.TestCase):
         transport = FlashDevice(wrong_offset=True)
         with self.assertRaises(ProtocolError):
             flash_application(transport, image, identity=DeviceIdentity(0x6013, 106), qualification=qualification(image))
-        self.assertEqual(transport.commands, [8, 0x2100, 4, 3])
+        self.assertEqual(transport.commands, [8, 0x2100, 0xC1, 4, 3])
 
 
 if __name__ == "__main__":
