@@ -121,7 +121,8 @@ class BootHidrawTransport(HidrawTransport):
     def _check_descriptor(self, descriptor: bytes) -> None:
         from .discovery import report_layout
         pages, inputs, outputs = report_layout(descriptor, report_bits=512, unnumbered=True)
-        if not (any(page >= 0xFF00 for page in pages) and inputs == {0} and outputs == {0}):
+        vendor_page = 0x008C in pages or any(0xFF00 <= page <= 0xFFFF for page in pages)
+        if not (vendor_page and inputs == {0} and outputs == {0}):
             raise ValueError("The boot interface must have unnumbered 64-byte vendor reports.")
 
     def _check_output(self, report: bytes) -> None:
