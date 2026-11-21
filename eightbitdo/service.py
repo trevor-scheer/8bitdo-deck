@@ -520,7 +520,7 @@ class Service:
     def export_diagnostics(self) -> dict:
         devices, warnings = self._devices(probe=False)
         payload = {
-            "schema_version": 1, "app_version": "0.1.4",
+            "schema_version": 1, "app_version": "0.1.5",
             "devices": [{k: v for k, v in d.public().items() if k in {
                 "vid", "pid", "role", "firmware_version", "status", "can_update", "backend",
             }} for d in devices],
