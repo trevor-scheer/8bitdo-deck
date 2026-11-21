@@ -18,6 +18,7 @@ PAYLOAD_SIZE = 46
 BLOCK_SIZE = 4096
 MAX_IMAGE_SIZE = 8 * 1024 * 1024
 MODERN_PIDS = frozenset({0x6012, 0x6013})
+STAGING_BASES = {0x6012: 0x32000, 0x6013: 0x13000}
 # Desktop updater model tags, not USB PIDs; see docs/protocol.md.
 LEGACY_TARGETS = {
     0x3109: {0x0023: 0x6008, 0x3013: 0x3013, 0x9023: 0x3013},
@@ -314,17 +315,19 @@ def _exchange(
     return reply
 
 
-def _verify_block(transport: ReportTransport, offset: int, block: bytes) -> None:
+def _verify_block(transport: ReportTransport, offset: int, block: bytes, *, staging_base: int) -> None:
     request = struct.pack("<III", offset, len(block), BLOCK_SIZE)
     reply = _exchange(transport, 0xC3, data=request, total_length=len(request), offset=offset)
     if len(reply.payload) != 2 or struct.unpack("<H", reply.payload)[0] != crc16(block):
         raise ProtocolError("Device firmware CRC verification failed")
     for position in range(0, len(block), PAYLOAD_SIZE):
         expected = block[position:position + PAYLOAD_SIZE]
+        # Write/erase/CRC commands add the staging base; command 05 reads absolute flash addresses.
+        read_address = staging_base + offset + position
         reply = _exchange(
-            transport, 5, length=len(expected), total_length=len(expected), offset=offset + position,
+            transport, 5, length=len(expected), total_length=len(expected), offset=read_address,
         )
-        if reply.offset != offset + position or reply.payload != expected:
+        if reply.offset != read_address or reply.payload != expected:
             raise ProtocolError("Device firmware readback verification failed")
 
 
@@ -383,7 +386,7 @@ the returned result; this function never declares a completed update.
                 raise ProtocolError("Write acknowledgment address does not match")
             notify("writing", offset + len(chunk), total)
         notify("verifying", block_start, total)
-        _verify_block(transport, block_start, block)
+        _verify_block(transport, block_start, block, staging_base=STAGING_BASES[identity.product_id])
     notify("committing", total, total)
     _exchange(transport, 0xC4, data=struct.pack("<II", total, image.version_raw))
     notify("restarting", total, total)
