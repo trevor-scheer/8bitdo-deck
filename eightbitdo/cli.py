@@ -11,6 +11,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state-dir", type=Path, help="Directory for local firmware cache and jobs")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("scan", help="Identify connected devices and read firmware versions")
+    sub.add_parser("probe-wireless", help="Read firmware identity over a reviewed radio path without starting an update")
     sub.add_parser("models", help="List model-specific update guidance")
     releases = sub.add_parser("releases", help="List official stable firmware releases")
     releases.add_argument("model_id")
@@ -31,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
         match args.command:
             case "scan":
                 result = service.scan_devices()
+            case "probe-wireless":
+                result = service.probe_wireless()
             case "models":
                 result = service.get_models()
             case "releases":

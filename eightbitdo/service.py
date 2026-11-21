@@ -37,7 +37,7 @@ class Service:
                 name="Ultimate 2 Wireless controller (via receiver)", vid="2dc8", pid="wireless",
                 role="controller", model_id="ultimate2-controller", firmware_version=d.paired_firmware_version,
                 status="wireless", can_update=False,
-                reason="Version read through the receiver. Connect the controller directly by USB before updating its firmware.",
+                reason="Firmware version read wirelessly through the receiver. Native firmware installation is not yet validated.",
             ) for d in devices if d.paired_firmware_version]
             devices.extend(paired_devices)
         warnings = []
@@ -50,6 +50,28 @@ class Service:
     def scan_devices(self) -> dict:
         devices, warnings = self._devices()
         return {"devices": [d.public() for d in devices], "warnings": warnings}
+
+    def probe_wireless(self) -> dict:
+        from .wireless import query_wireless_target
+
+        results = []
+        for device in discover():
+            if int(device.pid, 16) not in (0x310B, 0x6013):
+                continue
+            result = {"id": device.id, "can_update": False}
+            try:
+                if not device.hid_paths:
+                    raise ValueError("No compatible USB control interface")
+                with HidrawTransport(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
+                    target = query_wireless_target(transport, usb_pid=int(device.pid, 16))
+                result.update(status="radio_identity_verified", receiver_version=target.receiver.version,
+                              controller_version=target.controller.version, controller_pid=f"{target.controller.pid:04x}",
+                              battery_percent=target.status.battery_percent,
+                              message="Radio firmware identity verified. No firmware was written; installation is not qualified.")
+            except (OSError, ValueError, TimeoutError, RuntimeError) as error:
+                result.update(status="not_verified", reason=clean_text(str(error)))
+            results.append(result)
+        return {"devices": results}
 
     def get_models(self) -> list[dict]:
         models = [model.public() for model in MODELS]
