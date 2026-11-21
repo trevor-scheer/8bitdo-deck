@@ -410,13 +410,13 @@ the returned result; this function never declares a completed update.
     for block_start in range(0, total, BLOCK_SIZE):
         block = image.payload[block_start:block_start + BLOCK_SIZE]
         notify("erasing", block_start, total)
-        reply = _exchange(transport, 4, total_length=len(block), offset=block_start, timeout=10.0)
+        reply = _exchange(transport, 4, offset=block_start, timeout=10.0)
         if reply.offset != block_start:
             raise ProtocolError("Erase acknowledgment address does not match")
         for position in range(0, len(block), PAYLOAD_SIZE):
             chunk = block[position:position + PAYLOAD_SIZE]
             offset = block_start + position
-            reply = _exchange(transport, 3, data=chunk, total_length=total, offset=offset)
+            reply = _exchange(transport, 3, data=chunk, total_length=len(chunk), offset=offset)
             if reply.offset != offset:
                 raise ProtocolError("Write acknowledgment address does not match")
             notify("writing", offset + len(chunk), total)
