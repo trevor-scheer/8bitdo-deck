@@ -212,6 +212,40 @@ a readback of the installed receiver. Application updates skip the boot
 prefix. No recovery after erase or power loss has been performed on the
 user's receiver.
 
+### Application boot-entry follow-up
+
+Static inspection of the extracted applications narrows the entry path but
+**does not eliminate the migration exception**. The version 1.03 application
+SHA-256 is `41cb3846b0005d29f69880f87603f43111ed196bbaa2dd8b7cc1177d5550b7d3`;
+version 1.04 is `a21c0fa6e0d35fe0933dbc4cc95f9cd789f6db2b8c7c29c7b3b23c67e1e874da`.
+These are hashes of statically extracted `app.bin`, distinct from DAT hashes.
+
+| Application | Command `51` dispatch | Final entry routine |
+| --- | --- | --- |
+| 1.03 | `01e017d8`–`01e017de`, parameter handler `01e00e3a` | `01e0385c`–`01e03872` |
+| 1.04 | `01e018ac`–`01e018b2`, parameter handler `01e00f0a` | `01e038b6`–`01e038cc` |
+
+The parameter-zero branch sets the application upgrade flag in RAM. The final
+entry routine copies eight bytes, literal `ubootZst`, from initialized RAM
+`2af1` to retained RAM `10800`, then invokes the chip-reset path through code
+copied into RAM. It does not directly call the bootloader with a chosen boot
+base. The bootloader's `4dfe` routine checks and clears that same retained-RAM
+magic. The inspected Jieli BR23 linker definitions independently name
+`10800` as `nvram_list` and `1127a8` as `memcpy`.
+
+The vendor parser's visible application caller uses an internal `66 aa`
+envelope. The normalization of the complete USB report `81 05 00 51 00` into
+that envelope was not fully traced. The desktop updater independently proves
+which USB report it sends; the application findings do not constitute a
+complete proof of every intervening path or side effect.
+
+Even if that linkage is completed, the identified reset routine does not
+establish the subsequent ROM-supplied `[r0+4]` boot-base argument. ROM selection
+and the installed flash layout remain outside this trace. Identical official
+boot prefixes and the zero-based packaged layout are compatibility evidence,
+not proof that the live migration guard is false. This follow-up does not
+justify marking boot entry read-only or enabling a write authorization.
+
 ## Experimental authorization and connection handoff
 
 `LegacySourceReviewedAuthorization` is distinct from `FlashQualification`.
