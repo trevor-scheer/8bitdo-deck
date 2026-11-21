@@ -5,12 +5,14 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from eightbitdo.catalog import Artifact, Release
 from eightbitdo.discovery import Device
 from eightbitdo.jobs import JobStore
 from eightbitdo.service import Service
+from eightbitdo.protocol import DeviceIdentity, FlashQualification, parse_firmware
+from eightbitdo.qualifications import qualification_for
 
 
 class ServiceTests(unittest.TestCase):
@@ -152,6 +154,116 @@ class ServiceTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "already"):
                 with another.lock(job["id"]):
                     self.fail("Lock was not exclusive")
+
+    def native_job(self):
+        directory = self.root / "firmware"
+        directory.mkdir(exist_ok=True)
+        image_path = directory / "image.dat"
+        image_path.write_bytes(self.image)
+        job = self.service.store.create("usb-" + "a" * 16, "ultimate2-receiver", "release1")
+        job.update(backend="hid", artifact_path=str(image_path), sha256=hashlib.sha256(self.image).hexdigest(), version="1.06", original_version="1.05")
+        return job
+
+    def test_default_qualification_registry_enables_no_native_writes(self):
+        image = parse_firmware(self.image)
+        self.assertIsNone(qualification_for(image, DeviceIdentity(0x6013, 105)))
+
+    def test_native_install_requires_qualification_again(self):
+        job = self.native_job()
+        device = Device(job["device_id"], "Receiver", "2dc8", "6013", hid_paths=[Path("/dev/fake")])
+        with patch.object(self.service, "_native_device", return_value=device), \
+                patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
+                patch("eightbitdo.service.query_identity", return_value=DeviceIdentity(0x6013, 105)), \
+                patch("eightbitdo.service.flash_application") as flash:
+            with self.assertRaisesRegex(ValueError, "qualification"):
+                self.service.run_install(job)
+        flash.assert_not_called()
+
+    def test_native_modified_image_fails_before_device_io(self):
+        job = self.native_job()
+        Path(job["artifact_path"]).write_bytes(b"modified")
+        with patch("eightbitdo.service.HidrawTransport") as transport:
+            with self.assertRaisesRegex(ValueError, "changed"):
+                self.service.run_install(job)
+        transport.assert_not_called()
+
+    def test_native_cache_path_cannot_escape_state(self):
+        job = self.native_job()
+        job["artifact_path"] = str(self.image_path)
+        with self.assertRaisesRegex(ValueError, "outside"):
+            self.service.run_install(job)
+
+    def test_qualified_native_job_requires_reconnect_version_check(self):
+        job = self.native_job()
+        device = Device(job["device_id"], "Receiver", "2dc8", "6013", firmware_version="1.06", hid_paths=[Path("/dev/fake")])
+        record = FlashQualification(0x6013, None, 0, job["sha256"], "Test fixture, not hardware evidence", (105,))
+        with patch.object(self.service, "_native_device", return_value=device) as rediscover, \
+                patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
+                patch("eightbitdo.service.query_identity", return_value=DeviceIdentity(0x6013, 105)), \
+                patch("eightbitdo.service.qualification_for", return_value=record), \
+                patch("eightbitdo.service.flash_application") as flash:
+            self.service.run_install(job)
+        flash.assert_called_once()
+        self.assertEqual(rediscover.call_count, 2)
+        self.assertEqual(self.service.get_job(job["id"])["state"], "complete")
+
+    def test_native_worker_is_launched_under_suspend_inhibitor(self):
+        job = self.native_job()
+        with patch("eightbitdo.service.shutil.which", side_effect=lambda name: "/usr/bin/" + name), \
+                patch("eightbitdo.service.subprocess.Popen") as spawn:
+            self.service._spawn(job, "install")
+        command = spawn.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/systemd-inhibit")
+        self.assertIn("--what=sleep", command)
+        self.assertIn("--mode=block", command)
+        self.assertTrue(spawn.call_args.kwargs["start_new_session"])
+
+    def test_native_worker_without_inhibitor_never_starts(self):
+        job = self.native_job()
+        with patch("eightbitdo.service.shutil.which", return_value=None), \
+                patch("eightbitdo.service.subprocess.Popen") as spawn:
+            with self.assertRaisesRegex(RuntimeError, "prevent suspend"):
+                self.service._spawn(job, "install")
+        spawn.assert_not_called()
+
+    def test_qualification_binds_the_source_version(self):
+        image = parse_firmware(self.image)
+        record = FlashQualification(0x6013, None, 0, image.sha256, "Test fixture only", (105,))
+        with patch("eightbitdo.qualifications.QUALIFICATIONS", (record,)):
+            self.assertIsNotNone(qualification_for(image, DeviceIdentity(0x6013, 105)))
+            self.assertIsNone(qualification_for(image, DeviceIdentity(0x6013, 104)))
+            self.assertIsNone(qualification_for(image, DeviceIdentity(0x6013, 105, beta=1)))
+
+    def test_reporting_failure_does_not_abort_a_native_transaction(self):
+        job = self.native_job()
+        device = Device(job["device_id"], "Receiver", "2dc8", "6013", firmware_version="1.06", hid_paths=[Path("/dev/fake")])
+        record = FlashQualification(0x6013, None, 0, job["sha256"], "Test fixture only", (105,))
+
+        def perform_flash(*args, **kwargs):
+            with patch.object(self.service.store, "save", side_effect=OSError("disk full")):
+                kwargs["progress"]("writing", 2, 4)
+                kwargs["progress"]("verifying", 4, 4)
+
+        with patch.object(self.service, "_native_device", return_value=device), \
+                patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
+                patch("eightbitdo.service.query_identity", return_value=DeviceIdentity(0x6013, 105)), \
+                patch("eightbitdo.service.qualification_for", return_value=record), \
+                patch("eightbitdo.service.flash_application", side_effect=perform_flash):
+            self.service.run_install(job)
+        self.assertEqual(job["state"], "complete")
+        self.assertIn("reporting_error", job)
+
+    def test_native_update_lock_covers_reconnect_verification(self):
+        job = self.native_job()
+        other = JobStore(self.root)
+
+        def native_operation(active_job):
+            with self.assertRaises(RuntimeError):
+                with other.lock("update-" + active_job["device_id"]):
+                    self.fail("Concurrent update acquired the device")
+
+        with patch.object(self.service, "_install_native", side_effect=native_operation):
+            self.service.run_install(job)
 
 
 if __name__ == "__main__":

@@ -108,6 +108,7 @@ this object. A nonempty evidence string alone is not hardware verification.
     image_revision: int
     image_sha256: str
     evidence: str
+    source_versions: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -342,6 +343,8 @@ the returned result; this function never declares a completed update.
         or qualification.image_revision != image.revision
         or qualification.image_sha256 != image.sha256
         or not qualification.evidence.strip()
+        or identity.version_raw not in qualification.source_versions
+        or identity.beta != 0
     ):
         raise FirmwareMismatch("Firmware, hardware, and qualification record do not match")
     if image.address != 0x5000 or len(image.payload) > 0x3B000 or image.payload[8:12] != b"KNLT":

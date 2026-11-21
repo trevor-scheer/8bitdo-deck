@@ -12,8 +12,10 @@ from .catalog import Catalog
 from .discovery import Device, clean_text, discover, inspect_device
 from .fwupd import Fwupd, FwupdError
 from .jobs import ACTIVE_STATES, JobStore, default_state_dir, public_job
-from .protocol import parse_firmware
+from .protocol import flash_application, parse_firmware, query_identity
+from .qualifications import qualification_for
 from .registry import MODELS, get_model
+from .transport import HidrawTransport
 
 
 OFFICIAL_UPDATER = "https://web.8bitdo.com/"
@@ -80,13 +82,20 @@ class Service:
         source_root = Path(__file__).resolve().parent.parent
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(source_root)
+        command = [executable, "-m", "eightbitdo.worker", str(self.state_dir), job["id"], action]
+        if action == "install" and job.get("backend") == "hid":
+            inhibitor = shutil.which("systemd-inhibit")
+            if not inhibitor:
+                raise RuntimeError("Cannot prevent suspend during the native update.")
+            command = [inhibitor, "--what=sleep", "--mode=block", "--who=8BitDo Deck",
+                       "--why=Updating controller firmware", *command]
         job["worker_pid"] = None
         job["started_at"] = time.time()
         self.store.save(job)
         try:
             with (self.store.directory / (job["id"] + ".log")).open("ab") as log:
                 subprocess.Popen(
-                    [executable, "-m", "eightbitdo.worker", str(self.state_dir), job["id"], action],
+                    command,
                     stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                     cwd=source_root, env=environment, start_new_session=True, close_fds=True,
                 )
@@ -143,7 +152,7 @@ class Service:
     def install_update(self, job_id: str) -> dict:
         with self.store.lock(job_id):
             job = self.store.read(job_id)
-            if job["state"] != "ready" or not job["can_install"] or job.get("backend") != "fwupd":
+            if job["state"] != "ready" or not job["can_install"] or job.get("backend") not in {"fwupd", "hid"}:
                 raise ValueError("This firmware is not qualified for installation. Use the official updater for this model.")
             job.update(state="queued", can_install=False, progress=0, message="Starting the confirmed update. Keep the device connected.")
             self._spawn(job, "install")
@@ -185,9 +194,20 @@ class Service:
             version=image.version, sha256=artifact.sha256, artifact_path=artifact.path,
             message="Firmware downloaded; model and version headers match. Native installation is awaiting hardware qualification. " + artifact.verification_note + " Use Open official updater to update this model.",
         )
+        if job["device_id"]:
+            device = self._native_device(job["device_id"], model.id)
+            with HidrawTransport(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
+                identity = query_identity(transport, usb_pid=int(device.pid, 16))
+            if qualification_for(image, identity) is not None:
+                job.update(state="ready", can_install=True, original_version=identity.version,
+                           message="The image matches a hardware qualification record. Review the target and version before installing.")
         self.store.save(job)
 
     def run_install(self, job: dict) -> None:
+        if job.get("backend") == "hid":
+            with self.store.lock("update-" + job["device_id"]):
+                self._install_native(job)
+            return
         if job.get("backend") != "fwupd" or not job["device_id"].startswith("fwupd-"):
             raise ValueError("This device has no qualified native installation path.")
         with self.store.lock(job["device_id"]):
@@ -206,6 +226,69 @@ class Service:
                 time.sleep(1)
             job.update(state="blocked", can_install=False, message="fwupd finished, but the new version could not be confirmed. Reconnect the device and scan; do not repeat the update yet.")
             self.store.save(job)
+
+    def _native_device(self, device_id: str, model_id: str) -> Device:
+        device = next((d for d in discover() if d.id == device_id), None)
+        if not device:
+            raise ValueError("The selected USB device disconnected. Scan again.")
+        device = inspect_device(device, self.state_dir / "locks")
+        if device.status != "identified" or device.model_id != model_id or not device.hid_paths:
+            raise ValueError("The USB target no longer matches the selected firmware.")
+        return device
+
+    def _install_native(self, job: dict) -> None:
+        model = get_model(job["model_id"])
+        cache = (self.state_dir / "firmware").resolve()
+        path = Path(job["artifact_path"])
+        if path.is_symlink() or not path.resolve().is_relative_to(cache):
+            raise ValueError("The firmware image is outside the validated cache.")
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != job["sha256"]:
+            raise ValueError("The firmware image changed after preparation.")
+        image = parse_firmware(data, expected_pid=model.firmware_pid)
+        if image.version != job["version"]:
+            raise ValueError("The firmware version changed after preparation.")
+        device = self._native_device(job["device_id"], model.id)
+        with HidrawTransport(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
+            identity = query_identity(transport, usb_pid=int(device.pid, 16))
+            qualification = qualification_for(image, identity)
+            if qualification is None or identity.version != job.get("original_version"):
+                raise ValueError("The target or its hardware qualification changed. Prepare the update again.")
+            job.update(state="installing", progress=0, can_install=False,
+                       message="Installing the qualified image. Keep the device connected.")
+            self.store.save(job)
+
+            def progress(stage: str, done: int, total: int) -> None:
+                percent = min(90, int(done * 90 / max(1, total)))
+                if percent > job["progress"] or job.get("stage") != stage:
+                    job.update(progress=max(job["progress"], percent), stage=stage,
+                               message=f"Native update: {stage}. Keep USB connected.")
+                    # Reporting failure must not interrupt a partially erased
+                    # device. The initial durable job record precedes all writes.
+                    self._save_progress(job)
+
+            flash_application(transport, image, identity=identity, qualification=qualification, progress=progress)
+        job.update(state="verifying", progress=95, message="Waiting for the same USB target and checking its firmware version.")
+        self._save_progress(job)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                device = self._native_device(job["device_id"], model.id)
+                if device.firmware_version == job["version"]:
+                    job.update(state="complete", progress=100, message=f"Update complete. The device reports firmware {job['version']}.")
+                    self._save_progress(job)
+                    return
+            except (OSError, ValueError, RuntimeError):
+                pass
+            time.sleep(0.5)
+        job.update(state="blocked", can_install=False, message="The image verified, but reconnection/version verification did not finish. Check the device before retrying.")
+        self._save_progress(job)
+
+    def _save_progress(self, job: dict) -> None:
+        try:
+            self.store.save(job)
+        except (OSError, ValueError):
+            job["reporting_error"] = "Progress storage failed; verify the device before retrying."
 
     def export_diagnostics(self) -> dict:
         devices, warnings = self._devices(probe=False)

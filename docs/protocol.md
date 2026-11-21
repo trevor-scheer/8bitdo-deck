@@ -31,7 +31,7 @@ Application replies have report ID `02`, class `05`, and the same header layout.
 
 The transaction follows these steps:
 
-1. Require a qualification record bound to product ID, reported hardware revision (or an explicit unreported value), image revision, and exact image SHA-256. Recompute the image hash from its header and payload.
+1. Require a qualification record bound to product ID, reported hardware revision (or an explicit unreported value), allowed stable source firmware versions, image revision, and exact image SHA-256. Recompute the image hash from its header and payload. Beta source firmware is not accepted.
 2. Restrict the image to the Ultimate 2 Telink layout: physical header address `5000`, bounded image length, and `KNLT` payload marker. Requery identity and verify the application-mode product ID.
 3. For each block of at most 4096 bytes, erase with command `04` and write in at most 46-byte chunks with command `03`. Application-mode addresses start at logical zero, as in the vendor sequence. This must not be used as a bootloader write routine.
 4. Compare the device's block CRC through command `C3`, then compare a complete byte-for-byte readback through command `05`. Correlate write and read acknowledgments with their addresses. These stricter checks must be confirmed against real target replies during qualification.
@@ -42,6 +42,8 @@ No erase, write, commit, or reset is retried. An exception does not trigger a re
 
 The application owns image download/authentication policy, device locking, suspend inhibition, persistent job state, reconnect correlation, and the progress callback. A callback failure propagates, so the application should make status reporting reliable and retain the failed stage. A local SHA-256 binds bytes; it does not prove vendor authenticity.
 
+The job engine checks the source-reviewed records in `eightbitdo/qualifications.py`; that collection is empty in this build. It rechecks the image digest, identity, and qualification before calling the transaction, binds the opened HID node to its original USB port, and retains an update lock through reconnect verification. Status persistence after writes start is best-effort so a full disk cannot abort a partially erased device. No UI input can add a qualification.
+
 ## First hardware qualification
 
 Before enabling a registry entry, record the physical model and hardware revision if available, controller versus receiver role, USB/HID descriptor, original version, official image URL and hashes, and the recovery procedure verified for that exact device. Capture an official successful update to establish application addressing, acknowledgments, checksum/readback behavior, commit semantics, and reconnect identity.
@@ -49,3 +51,5 @@ Before enabling a registry entry, record the physical model and hardware revisio
 Compare that evidence with every native transaction stage. Exercise the native updater on an explicitly approved test target with stable USB and power. Record readback and the final reported version, and check normal controller operation afterward. Test failure handling with recorded or simulated traffic; destructive power-loss testing requires a recoverable test device and its own deliberate procedure.
 
 Add a qualification record only for the tested model, role, hardware revision, and image. Do not generalize from the receiver to its controller, from one Ultimate generation to another, or from application mode to a shared bootloader. Unknown hardware revisions require evidence explaining how compatibility is otherwise established. Neither a checked UI box nor manually selecting a model can create a qualification record.
+
+Matching two `None` hardware revisions means both are unreported; it does not verify a board revision. The evidence must identify how the physical model and revision scope were established. Source firmware versions must be listed explicitly because application update behavior can change between versions.

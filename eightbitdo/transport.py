@@ -10,8 +10,9 @@ from pathlib import Path
 class HidrawTransport:
     """Exclusive, bounded HID access with identity checked on the opened fd."""
 
-    def __init__(self, path: Path, pid: int, lock_path: Path):
+    def __init__(self, path: Path, pid: int, lock_path: Path, *, expected_usb_path: str | None = None):
         self.path, self.pid, self.lock_path = path, pid, lock_path
+        self.expected_usb_path = expected_usb_path
         self.fd: int | None = None
         self.lock_fd: int | None = None
 
@@ -24,8 +25,14 @@ class HidrawTransport:
             except BlockingIOError:
                 raise RuntimeError("Another update or query is using this device.") from None
             self.fd = os.open(self.path, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
-            if not stat.S_ISCHR(os.fstat(self.fd).st_mode):
+            opened = os.fstat(self.fd)
+            if not stat.S_ISCHR(opened.st_mode):
                 raise ValueError("The selected HID path is not a device.")
+            if self.expected_usb_path is not None:
+                physical = Path(f"/sys/dev/char/{os.major(opened.st_rdev)}:{os.minor(opened.st_rdev)}/device").resolve(strict=True)
+                usb = next((p for p in physical.parents if (p / "idVendor").is_file()), None)
+                if usb is None or usb != Path(self.expected_usb_path).resolve(strict=True):
+                    raise ValueError("The HID node now belongs to a different USB port. Scan again.")
             info = bytearray(8)
             fcntl.ioctl(self.fd, 0x80084803, info, True)  # HIDIOCGRAWINFO, Linux UAPI
             bus, vendor, product = struct.unpack("IHH", info)

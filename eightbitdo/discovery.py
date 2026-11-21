@@ -141,7 +141,7 @@ def inspect_device(device: Device, lock_dir: Path) -> Device:
             errors.append("USB access denied. Use the official updater's Linux setup or a narrowly scoped HID permission rule.")
             continue
         try:
-            with HidrawTransport(path, pid, lock_dir / (device.id + ".lock")) as transport:
+            with HidrawTransport(path, pid, lock_dir / (device.id + ".lock"), expected_usb_path=device.usb_path or None) as transport:
                 identity = query_identity(transport, usb_pid=pid)
                 if pid == 0x6013 and identity.target_verified:
                     try:

@@ -88,7 +88,7 @@ class FlashDevice:
 
 
 def qualification(image):
-    return FlashQualification(image.pid, None, image.revision, image.sha256, "Test fixture only")
+    return FlashQualification(image.pid, None, image.revision, image.sha256, "Test fixture only", (106,))
 
 
 class ProtocolTests(unittest.TestCase):
