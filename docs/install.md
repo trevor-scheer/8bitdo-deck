@@ -1,6 +1,6 @@
 # Install 8BitDo Deck
 
-8BitDo Deck is an early development build. It can discover devices, browse official firmware, prepare updates, and open the official web updater. Legacy installation through fwupd requires a supported 8BitDo device already in bootloader mode and a unique, trusted upgrade release. One source-reviewed experimental native update is enabled after matching preflight: Ultimate 2 Wireless receiver stable 1.01 to the exact reviewed official 1.06 image. Native controller, wireless, and legacy updates remain blocked. No native update is hardware-qualified; see the [protocol requirements](protocol.md#authorization-and-hardware-qualification).
+8BitDo Deck is an early development build. It can discover devices, browse official firmware, prepare updates, and open the official web updater. Legacy installation through fwupd requires a supported 8BitDo device already in bootloader mode and a unique, trusted upgrade release. Two source-reviewed experimental native updates are enabled after matching preflight: Ultimate 2 Wireless receiver stable 1.01 → official 1.06 and original Ultimate Bluetooth receiver stable 1.03 → official 1.04. Each permits only its exact reviewed image. Native controller, wireless, and other version combinations remain blocked. No native update is hardware-qualified; see the [protocol requirements](protocol.md#authorization-and-hardware-qualification).
 
 ## Get the plugin
 
@@ -61,24 +61,36 @@ The fwupd route preserves the system service's authorization and configured repo
 
 **Open official updater** launches the vendor website in the Google Chrome Flatpak installed through Discover. Website support varies by model: the Ultimate Bluetooth receiver (`6008`) appears in its firmware catalog but has no update route in the inspected web implementation. This button is not a validated fallback for every detected device. Chrome's USB access and any vendor-specific connection instructions may need setup in Desktop Mode; the plugin does not automatically change those permissions. A validated firmware download with a blocked installation state is not a completed device update.
 
-### First experimental receiver update
+### Experimental receiver updates
 
-Only the Ultimate 2 Wireless receiver running stable 1.01 has a source-reviewed authorization. Its complete bootloader and installed application must match the compiled fingerprints, and the destination must be the exact reviewed official 1.06 image. An unreported board revision is constrained by those code fingerprints and verified firmware PID `6013`; the version label alone is insufficient.
+Choose the matching receiver and destination:
 
-1. Keep the receiver connected to the Deck by USB and scan devices. Select **Ultimate 2 Wireless receiver** reporting **1.01**, not its paired controller or the original Ultimate Bluetooth receiver.
-2. Select official firmware **1.06** and choose **Prepare firmware**. Preparation verifies the image, target, source fingerprints, and recovery access. A mismatch keeps installation blocked.
-3. Choose **Review installation** and read the source-reviewed experimental evidence and target/version details. The unchanged-firmware recovery round trip passed; first installation, pending-image copy, and power-loss recovery remain untested.
-4. To perform the update, select **Confirm firmware installation**. Keep USB and power connected until the plugin verifies the returning receiver’s version. Check normal controller/receiver operation afterward.
+| Receiver | Required source | Authorized destination | Compatibility checks |
+| --- | --- | --- | --- |
+| Ultimate 2 Wireless (`6013`) | Stable 1.01 | Exact reviewed official 1.06 | Complete installed bootloader and application fingerprints, verified target, image layout, and checksum |
+| Original Ultimate Bluetooth (`6008`) | Stable 1.03 | Exact reviewed official 1.04 | Verified model tag and boot target, reviewed packaged boot prefix, and exact initialization geometry |
 
-Preparation does not start the update. The user’s final confirmation does. No hardware qualification or legacy source-reviewed record is enabled, and this authorization does not permit controller updates, radio firmware writes, other source versions, or a different image.
+The original receiver's installed bootloader bytes have not been fingerprinted. Its boot round trip and one existing application-page CRC passed. Both paths remain experimental: first installation, recovery reinstall, pending-image copy, and power-loss recovery have not been hardware-validated.
 
-### Check an interrupted Ultimate 2 receiver update
+1. Keep the receiver connected to the Deck by USB, scan devices, and select its receiver entry.
+2. Select its authorized destination above and choose **Prepare firmware**. Preparation validates the image and applicable source checks. A mismatch keeps installation blocked; legacy boot geometry is checked after confirmed entry and before erase.
+3. Choose **Review installation** and read the experimental evidence, target, and version details.
+4. To start the update, select **Confirm firmware installation**. Keep USB and power connected until the plugin verifies the returning receiver's version. Check normal controller/receiver operation afterward.
 
-For an eligible failed or blocked source-reviewed Ultimate 2 receiver install, **Check interrupted update** inspects the receiver without changing mode or resetting. Eligibility requires the previously attempted install, its original USB port and source version, its unchanged cached firmware image, and its authorization still present in the compiled registry. A downloaded image or manually selected device cannot enable recovery.
+Preparation does not start the update. The user's final confirmation does. `QUALIFICATIONS` remains empty; these experimental records do not permit controller updates, radio firmware writes, other source versions, or different images.
 
-If inspection permits reset, the plugin offers **Confirm receiver recovery**. This explicit confirmation starts a background worker that repeats all checks, resets once if still required and permitted, and verifies the receiver on the same port. Reset may cause the vendor bootloader to install an already committed image. Returning to the original version leaves the update incomplete; a timeout does not trigger another reset. Keep USB and power connected.
+### Check an interrupted receiver update
 
-The single 1.01 → 1.06 experimental authorization can support recovery only after an eligible install attempt; it does not enable recovery for an arbitrary attached device. A bounded hardware check on receiver 1.01 completed boot identity, inspection, one reset, and return to the unchanged source version on the same USB port. It used SteamOS’s existing access policy without administrator setup or permission changes. No firmware initialization, erase, write, or commit was sent. This does not validate pending-image copy or recovery from power loss; see the [recovery contract and evidence limits](receiver-recovery.md).
+For an eligible failed or blocked experimental receiver install, **Check interrupted update** inspects the receiver without changing mode, resetting, or writing firmware. Eligibility requires the same previously attempted job, its recorded original USB port and source version, the unchanged cached destination image, and its authorization still present in the compiled registry. A downloaded image or manually selected device cannot enable recovery.
+
+The permitted action depends on the receiver:
+
+- **Ultimate 2 Wireless:** **Confirm receiver recovery** reinspects and resets once if permitted. Reset can make the vendor bootloader finish an already committed image. This does not start another firmware transfer.
+- **Original Ultimate Bluetooth:** **Confirm erase and reinstall** explicitly starts a complete erase and reinstall of the same cached, authorized destination image. The worker rechecks boot target and geometry before writing. This is destructive recovery, not a reset-only operation.
+
+Both actions run under the update/device locks with suspend inhibition and repeat the job, image, authorization, port, and device checks. The original job completes only after the target version returns on the same port. An already installed target can be verified without writing; returning to the original version leaves the update incomplete. There is no automatic retry or boot-mode entry during recovery.
+
+Keep USB and power connected. The two successful bounded boot round trips sent no erase, image write, or commit; they do not validate interrupted-write recovery or power-loss safety. See the [recovery contract and evidence limits](receiver-recovery.md).
 
 ## Diagnose or remove the plugin
 

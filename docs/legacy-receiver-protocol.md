@@ -5,7 +5,9 @@ found in 8BitDo's desktop updater. Its offline tests establish packet encoding,
 image offsets, operation ordering, and failure handling. A bounded hardware
 check established boot entry, target `6008`, the initialization tuple, and
 return to runtime 1.03. This does not qualify firmware installation or recovery
-after interrupted writes. The legacy authorization registry remains empty.
+after interrupted writes. One source-reviewed experimental authorization permits
+stable 1.03 → the exact reviewed official 1.04 image; hardware qualifications
+remain empty.
 
 The original Ultimate Bluetooth receiver has firmware PID `6008`, catalog type
 `42`, and model identifier `80NA_R`. Runtime USB PID `3109` is shared with other
@@ -317,10 +319,13 @@ match all four authorized initialization fields before erase.
 An initial user-run update can therefore be authorized explicitly as an
 experimental source-reviewed transaction, without inventing a previous
 successful flash. The service must preserve that label and disclose its
-remaining hardware/recovery limits. No enabled authorization record is
-provided by this backend. Boot entry remains outside ordinary discovery and
-preview. The bounded stock-layout check above does not authorize an update or
-establish safe entry for arbitrary recovery states.
+remaining hardware/recovery limits. The compiled registry contains one record
+for stable source 103 and the exact official 1.04 DAT hash listed above, with
+the reviewed prefix and tuple `(4000, ffffffff, 0, 1000)`. It does not fingerprint
+the installed boot bytes. Boot entry remains outside ordinary discovery and
+preview; actual installation requires the user's explicit confirmation. The
+bounded stock-layout check does not establish safe entry for arbitrary recovery
+states.
 
 `connection.require_boot_access` checks setup and runtime access before entry.
 `wait_for_boot` opens only a boot interface on the original physical USB port,
@@ -329,6 +334,24 @@ PID `3208` or `3002` never supplies a firmware identity. The backend must still
 query its target. `wait_for_application` checks that same port's verified
 runtime target and exact stable firmware version after reset. A timeout or
 wrong identity cannot mark an update complete.
+
+## Interrupted-job recovery
+
+For an eligible previously attempted install, `check_recovery` opens only the
+recorded physical USB port and checks boot descriptor, firmware PID `6008`, and
+the exact `C1` tuple. This inspection sends no erase, write, `C2`, reset, or mode
+transition. An already installed target can complete the original job through
+runtime identity/version verification; the unchanged source stays incomplete.
+
+If boot inspection permits `reflash`, **Confirm erase and reinstall** explicitly
+authorizes a full erase and reinstall of the same cached destination image. The
+worker repeats the original-job context, source version, image hash, compiled
+authorization, and port checks. `flash_boot_receiver` rechecks target and
+geometry before erasing.
+It verifies the target runtime version on that port before completing the same
+job. There is no automatic retry or recovery mode transition. This path has
+host-side tests but no actual recovery reflash or power-loss validation. See the
+[shared recovery contract](receiver-recovery.md).
 
 ## Qualification still required
 
