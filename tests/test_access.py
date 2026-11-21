@@ -64,7 +64,9 @@ KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinpu
         digest = hashlib.sha256(RULE_TEXT.encode()).hexdigest() + '\n'
         for texts, expected in [([RULE_TEXT, None], False), ([RULE_TEXT, 'wrong'], False),
                                 ([RULE_TEXT, digest], True), (['different', digest], False)]:
-            with self.subTest(texts=texts), patch('eightbitdo.access._trusted_text', side_effect=texts):
+            with self.subTest(texts=texts), \
+                    patch('eightbitdo.access.steamos_recovery_access_available', return_value=False), \
+                    patch('eightbitdo.access._trusted_text', side_effect=texts):
                 self.assertEqual(recovery_access_configured(), expected)
 
     def test_non_root_writable_and_symlink_rules_are_untrusted(self):
