@@ -1,6 +1,7 @@
 import hashlib
 import json
 import struct
+import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
@@ -369,6 +370,30 @@ class ServiceTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.service._spawn(job, "install")
         spawn.assert_not_called()
+
+    def test_user_manager_rejection_preserves_log_and_fails_job_without_worker(self):
+        job = self.native_job()
+        launcher = self.root / "reject-launch"
+        launcher.write_text("#!/bin/sh\nprintf 'User manager rejected start\\n' >&2\nexit 1\n")
+        launcher.chmod(0o700)
+        processes = []
+        real_popen = subprocess.Popen
+        def launch(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+        with patch("eightbitdo.service.shutil.which", side_effect=lambda name: str(launcher) if name == "systemd-run" else "/usr/bin/" + name), \
+                patch("eightbitdo.service.subprocess.Popen", side_effect=launch):
+            self.service._spawn(job, "install")
+        self.assertEqual(processes[0].wait(timeout=5), 1)
+        log = self.service.store.directory / (job["id"] + ".log")
+        self.assertIn("User manager rejected start", log.read_text())
+        job["started_at"] = 0
+        self.service.store.save(job)
+        result = self.service.get_job(job["id"])
+        self.assertEqual(result["state"], "failed")
+        self.assertFalse(result["can_install"])
+        self.assertIsNone(self.service.store.read(job["id"])["worker_pid"])
 
     def test_native_worker_without_inhibitor_never_starts(self):
         job = self.native_job()

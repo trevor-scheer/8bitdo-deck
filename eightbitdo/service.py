@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 from .catalog import Catalog
@@ -124,9 +125,17 @@ class Service:
         command = [executable, "-m", "eightbitdo.worker", str(self.state_dir), job["id"], action]
         if action in {"install", "recover"} and job.get("backend") == "hid":
             inhibitor = shutil.which("systemd-inhibit")
-            if not inhibitor:
-                raise RuntimeError("Cannot prevent suspend during the native update.")
-            command = [inhibitor, "--what=sleep", "--mode=block", "--who=8BitDo Deck",
+            launcher = shutil.which("systemd-run")
+            if not inhibitor or not launcher:
+                raise RuntimeError("Cannot prevent suspend during the native update: user-session tools are unavailable.")
+            self.store.path(job["id"])
+            unit = f"8bitdo-deck-{job['id']}-{uuid.uuid4().hex[:12]}"
+            # Decky's unprivileged backend remains in a system-service cgroup.
+            # The user manager gives the worker normal local-session authorization.
+            command = [launcher, "--user", "--collect", "--wait", "--pipe", "--no-ask-password",
+                       "--service-type=exec", "--expand-environment=no", "--unit=" + unit,
+                       "--working-directory=" + str(source_root), "--setenv=PYTHONPATH=" + str(source_root),
+                       inhibitor, "--no-ask-password", "--what=sleep", "--mode=block", "--who=8BitDo Deck",
                        "--why=Updating controller firmware", *command]
         job["worker_action"] = action
         job["worker_pid"] = None
