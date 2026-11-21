@@ -363,6 +363,20 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("--mode=block", command)
         self.assertTrue(spawn.call_args.kwargs["start_new_session"])
 
+    def test_fwupd_install_worker_uses_protected_user_manager_launch(self):
+        job = self.job()
+        job.update(backend="fwupd", device_id="fwupd-fixture", model_id="fwupd-fixture")
+        with patch("eightbitdo.service.shutil.which", side_effect=lambda name: "/usr/bin/" + name), \
+                patch("eightbitdo.service.subprocess.Popen") as spawn:
+            self.service._spawn(job, "install")
+        command = spawn.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/systemd-run")
+        self.assertIn("--user", command)
+        self.assertIn("/usr/bin/systemd-inhibit", command)
+        self.assertIn("--what=sleep", command)
+        self.assertIn("--mode=block", command)
+        self.assertEqual(command[-1], "install")
+
     def test_missing_user_manager_launcher_never_falls_back_to_direct_worker(self):
         job = self.native_job()
         with patch("eightbitdo.service.shutil.which", side_effect=lambda name: None if name == "systemd-run" else "/usr/bin/" + name), \
