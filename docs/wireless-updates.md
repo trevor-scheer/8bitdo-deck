@@ -70,6 +70,8 @@ Write, erase, and CRC commands add a model-specific staging base to their logica
 
 Therefore readback must use `staging_base + logical_write_offset`. Adding the DAT image address `0x5000` again is incorrect for this vendor transfer branch. This investigation corrected that address handling in the disabled native backend and added regressions for both targets across multiple blocks.
 
+The audit also found a remaining verification mismatch: the device CRC handler constructs a CRC16 plus a 32-bit additive checksum, while the experimental backend expects a two-byte CRC response. Response header lengths and partial-block checksum behavior still need reconciliation with the vendor implementation before any write qualification. No CRC command was sent during the live probes.
+
 The application commit handlers persist a 52-byte record but do not themselves validate the complete staged image. A separate staging area alone does not prove interrupted-update recovery. The privately read bootloader is not redistributed with this project, and a firmware identity probe does not establish safe installation.
 
 ## Bootloader recovery findings

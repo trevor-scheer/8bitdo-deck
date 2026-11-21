@@ -58,6 +58,8 @@ The application owns image download/authentication policy, device locking, suspe
 
 The job engine checks the source-reviewed records in `eightbitdo/qualifications.py`; that collection is empty in this build. It rechecks the image digest, identity, and qualification before calling the transaction, binds the opened HID node to its original USB port, and retains an update lock through reconnect verification. Status persistence after writes start is best-effort so a full disk cannot abort a partially erased device. No UI input can add a qualification.
 
+The wireless investigation also identified an unresolved CRC response mismatch: the device builds a CRC16 plus an additive checksum, while this experimental backend expects two CRC bytes. Resolve the response framing and partial-block checksum behavior before adding any write qualification. See the [wireless findings](wireless-updates.md).
+
 ## First hardware qualification
 
 Before enabling a registry entry, record the physical model and hardware revision if available, controller versus receiver role, USB/HID descriptor, original version, official image URL and hashes, and the recovery procedure verified for that exact device. Capture an official successful update to establish application addressing, acknowledgments, checksum/readback behavior, commit semantics, and reconnect identity.
