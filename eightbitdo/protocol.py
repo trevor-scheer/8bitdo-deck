@@ -19,6 +19,7 @@ BLOCK_SIZE = 4096
 MAX_IMAGE_SIZE = 8 * 1024 * 1024
 MODERN_PIDS = frozenset({0x6012, 0x6013})
 STAGING_BASES = {0x6012: 0x32000, 0x6013: 0x13000}
+METADATA_BASES = {0x6012: 0x31000, 0x6013: 0x12000}
 # Keep the rounded installed image below metadata and the staging image within writable flash.
 MAX_APPLICATION_SIZES = {0x6012: 0x2C000, 0x6013: 0xC000}
 # Desktop updater model tags, not USB PIDs; see docs/protocol.md.
@@ -356,6 +357,23 @@ def _verify_block(transport: ReportTransport, offset: int, block: bytes, *, stag
             raise ProtocolError("Device firmware readback verification failed")
 
 
+def _check_commit_metadata(transport: ReportTransport, product_id: int) -> None:
+    record = bytearray()
+    for offset, count in ((0, 32), (32, 20)):
+        reply = _exchange(
+            transport, 5, length=count, total_length=count,
+            offset=METADATA_BASES[product_id] + offset,
+        )
+        record.extend(reply.payload)
+    # Factory receivers can have an erased record; the bootloader ignores its invalid CRC.
+    if record == b"\xff" * 52:
+        return
+    if crc16(record[:48]) != struct.unpack_from("<I", record, 48)[0]:
+        raise ProtocolError("Commit metadata is damaged; recovery review is required before updating")
+    if struct.unpack_from("<I", record, 24)[0] == 0xAEB14D6C:
+        raise ProtocolError("A firmware image is already pending; do not overwrite its staging area")
+
+
 def flash_application(
     transport: ReportTransport,
     image: FirmwareImage,
@@ -399,6 +417,7 @@ the returned result; this function never declares a completed update.
     current = query_identity(transport, usb_pid=identity.product_id)
     if current != identity:
         raise FirmwareMismatch("Device identity changed before updating")
+    _check_commit_metadata(transport, identity.product_id)
     total = len(image.payload)
     notify = progress or (lambda stage, done, size: None)
     notify("preparing", 0, total)

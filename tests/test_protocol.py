@@ -276,7 +276,8 @@ class ProtocolTests(unittest.TestCase):
                                                qualification=qualification(image))
                     reads = [struct.unpack_from("<HHHHII", report, 2)
                              for report in transport.sent if report[2:4] == b"\x05\0"]
-                    self.assertEqual(sum(header[2] for header in reads), size * 2)
+                    self.assertEqual(sum(header[2] for header in reads
+                                         if header[5] >= transport.staging_base), size * 2)
                     self.assertEqual(result.bytes_verified, size)
                     self.assertEqual(transport.commands[-2:], [0xC4, 7])
 
@@ -286,7 +287,7 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtocolError, "checksum verification"):
             flash_application(transport, image, identity=DeviceIdentity(0x6013, 106),
                               qualification=qualification(image))
-        self.assertNotIn(5, transport.commands)
+        self.assertNotIn(5, transport.commands[transport.commands.index(0xC1):])
         self.assertNotIn(0xC4, transport.commands)
         self.assertNotIn(7, transport.commands)
 
@@ -298,7 +299,7 @@ class ProtocolTests(unittest.TestCase):
                 with self.assertRaises(ProtocolError):
                     flash_application(transport, image, identity=DeviceIdentity(0x6013, 106),
                                       qualification=qualification(image))
-                self.assertEqual(transport.commands, [8, 0x2100, 0xC1])
+                self.assertEqual(transport.commands, [8, 0x2100, 5, 5, 0xC1])
 
     def test_changed_echoed_headers_abort_without_reset(self):
         for command in (0xC1, 4, 3, 0xC3, 5, 0xC4):
@@ -348,10 +349,11 @@ class ProtocolTests(unittest.TestCase):
                          for report in transport.sent if report[2:4] == b"\x05\0"]
                 logical_offsets = list(range(0, 4096, 46)) + list(range(4096, 4150, 46))
                 self.assertEqual(writes, logical_offsets)
-                self.assertEqual(reads, [staging_base + offset for offset in logical_offsets] * 2)
+                self.assertEqual(reads, [staging_base - 4096, staging_base - 4096 + 32]
+                                 + [staging_base + offset for offset in logical_offsets] * 2)
                 self.assertEqual(transport.commands.count(4), 2)
                 self.assertEqual(transport.commands.count(0xC3), 4)
-                self.assertEqual(transport.commands[:3], [8, 0x2100, 0xC1])
+                self.assertEqual(transport.commands[:5], [8, 0x2100, 5, 5, 0xC1])
                 self.assertEqual(transport.commands[-2:], [0xC4, 7])
                 self.assertEqual(struct.unpack_from("<HHHHII", transport.sent[-2], 2)[4:], (8, 0))
                 self.assertTrue(result.needs_reconnect_verification)
@@ -423,6 +425,22 @@ class ProtocolTests(unittest.TestCase):
                     for command in (0xC1, 3, 4, 0xC4, 7):
                         self.assertNotIn(command, transport.commands)
 
+    def test_erased_or_valid_idle_metadata_allows_transaction(self):
+        idle = bytearray(52)
+        struct.pack_into("<I", idle, 48, crc16(idle[:48]))
+        for pid in (0x6012, 0x6013):
+            for metadata in (b"\xff" * 52, bytes(idle)):
+                with self.subTest(pid=pid, erased=metadata[0] == 255):
+                    image = parse_firmware(firmware(pid=pid))
+                    transport = FlashDevice(pid=pid)
+                    transport.metadata = metadata
+                    result = flash_application(
+                        transport, image, identity=DeviceIdentity(pid, 106),
+                        qualification=qualification(image),
+                    )
+                    self.assertEqual(result.bytes_verified, len(image.payload))
+                    self.assertEqual(transport.commands[-2:], [0xC4, 7])
+
     def test_changed_device_stops_before_erase(self):
         image = parse_firmware(firmware())
         transport = QueueTransport([product_reply(), identity_report(version=108)])
@@ -435,7 +453,7 @@ class ProtocolTests(unittest.TestCase):
         transport = FlashDevice(fail_command=3)
         with self.assertRaises(ProtocolError):
             flash_application(transport, image, identity=DeviceIdentity(0x6013, 106), qualification=qualification(image))
-        self.assertEqual(transport.commands, [8, 0x2100, 0xC1, 4, 3])
+        self.assertEqual(transport.commands, [8, 0x2100, 5, 5, 0xC1, 4, 3])
 
     def test_readback_failure_never_commits(self):
         for pid in (0x6012, 0x6013):
@@ -487,7 +505,7 @@ class ProtocolTests(unittest.TestCase):
         transport = FlashDevice(wrong_offset=True)
         with self.assertRaises(ProtocolError):
             flash_application(transport, image, identity=DeviceIdentity(0x6013, 106), qualification=qualification(image))
-        self.assertEqual(transport.commands, [8, 0x2100, 0xC1, 4, 3])
+        self.assertEqual(transport.commands, [8, 0x2100, 5, 5, 0xC1, 4, 3])
 
 
 if __name__ == "__main__":
