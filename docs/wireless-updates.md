@@ -1,6 +1,6 @@
 # Wireless firmware update investigation
 
-Investigated on 2026-11-21. **The Ultimate 2 Wireless controller has a real update channel through its USB receiver.** A read-only firmware identity query and application-memory read succeeded over that channel on Steam Deck. No firmware was erased, written, committed, or reset during this investigation. Native installation remains disabled.
+Investigated on 2026-11-21. **The Ultimate 2 Wireless controller has a real update channel through its USB receiver.** A read-only firmware identity query and application-memory read succeeded over that channel on Steam Deck. A separate direct USB receiver checksum query also succeeded. No update initialization, firmware erase, write, commit, reset, or mode-change command was sent. Native installation remains disabled, with an empty qualification registry; this build is not ready for firmware installation.
 
 ## Live results
 
@@ -13,6 +13,8 @@ Two Ultimate 2 controllers connected wirelessly after being powered on. Their re
 | Radio updater PID through receiver 1.06 | Controller PID `6012`; direct receiver query returns `6013` |
 | Radio read of 32 bytes at controller address `0x5000` | Exact match to the official controller 1.10 image header |
 | Radio read of controller bootloader, addresses `0..0x4fff` | 20 KiB read successfully for private recovery analysis; version and battery status unchanged afterward |
+| Direct USB class-05 `C3` on receiver 1.06 | CRC16 and additive checksum matched 128 existing staging bytes read at absolute address `0x13000`; receiver remained at 1.06 |
+| Production `_verify_block` on those existing receiver bytes | Checksum and complete readback verification passed; receiver identity unchanged afterward |
 
 No radio updater commands were sent through receiver firmware 1.01: its forwarding implementation has not been reviewed. Successful paired-status reads do not establish firmware-update compatibility. No Bluetooth connections, pairing changes, or vendor Bluetooth commands were made; the Bluetooth observations below came from cached services and static analysis.
 
@@ -48,7 +50,7 @@ The [official Windows Ultimate Software V2 1.38 archive](https://support.8bitdo.
 
 Native `setWirelessupdate` (VA `0x1042d5f0`) sets a flag read by the packet builder (VA `0x10412e20`). That builder switches outgoing updater packets from class `05` to `06`. Responses still use class `05`. The native Windows wrapper requests 65 output bytes including report ID; Linux's inspected interface accepts the 64-byte identity/read requests tested here. Full transfer behavior requires separate qualification.
 
-The vendor's Ultimate 2 transfer branch starts erase/write/CRC offsets at zero and reads payload bytes after the 28-byte DAT header. It uses 4,096-byte blocks and at most 46 bytes per write. Its `C4` command sends payload length and version as two little-endian 32-bit values, followed by command `07` to reset. These facts establish intent and addressing, not successful installation by this project.
+The vendor's Ultimate 2 transfer branch starts erase/write/CRC offsets at zero and reads payload bytes after the 28-byte DAT header. It uses 4,096-byte blocks and at most 46 bytes per write. Native initialization at VA `0x10424170` sends `C1` with parameters, length, total length, and offset all zero. Commit at VA `0x1042c9d0` sends `C4` with length and total length 8, offset 0, and payload length/version as two little-endian 32-bit values, followed by command `07` to reset. The native backend now matches these fields. These facts establish intent and addressing, not successful installation by this project.
 
 ## Firmware routing and staging
 
@@ -59,7 +61,7 @@ The reviewed official images are:
 
 Offsets in this section exclude the DAT header. Receiver dispatch at `0x6200` routes class `06` to `rfUpdateCMD` at `0x614c`. Controller radio dispatch routes class `06` to its updater at `0xbb90`, also used by direct USB class `05`. The controller's command `08` handler at `0xbb3c` builds a constant PID reply without a flash operation. Receiver forwarding updates RAM bookkeeping only for this query.
 
-Commands `03` and `C3` also set a receiver update-state flag. **Do not use CRC command `C3` as a harmless connectivity probe.** Some controller erase/write error paths appear to send their failure acknowledgment to USB even for a radio request; a wireless host must stop on a bounded timeout and must not commit or blindly retry destructive commands.
+Forwarding class-06 commands `03` and `C3` also sets a receiver update-state flag. **Do not use radio CRC command `C3` as a harmless connectivity probe.** Direct receiver class-05 `C3` follows a separate local read-only handler. Some controller erase/write error paths appear to send their failure acknowledgment to USB even for a radio request; a wireless host must stop on a bounded timeout and must not commit or blindly retry destructive commands.
 
 Write, erase, and CRC commands add a model-specific staging base to their logical offsets. Command `05` instead reads an absolute flash address:
 
@@ -70,7 +72,11 @@ Write, erase, and CRC commands add a model-specific staging base to their logica
 
 Therefore readback must use `staging_base + logical_write_offset`. Adding the DAT image address `0x5000` again is incorrect for this vendor transfer branch. This investigation corrected that address handling in the disabled native backend and added regressions for both targets across multiple blocks.
 
-The audit also found a remaining verification mismatch: the device CRC handler constructs a CRC16 plus a 32-bit additive checksum, while the experimental backend expects a two-byte CRC response. Response header lengths and partial-block checksum behavior still need reconciliation with the vendor implementation before any write qualification. No CRC command was sent during the live probes.
+The audit corrected verification framing in the disabled native backend. Firmware `C3` handlers return six bytes—CRC16 plus a 32-bit additive checksum—while echoing the request's length field of 12. They also echo its CRC, total length, and offset. The parser now separates declared length from actual payload size and validates the echoed fields. `C1` likewise returns 16 bytes while echoing a length of 0; write, erase, and commit acknowledgments carry no payload despite their echoed lengths.
+
+For blocks of at most 4096 bytes, the firmware checks `floor(length / 128) * 128` bytes. The backend compares both checksums over that prefix and verifies all bytes, including the tail, by absolute readback. Tests model these firmware behaviors for both targets. Preflight now checks the embedded product ID and conservative model-specific flash bounds; see the [native protocol contract](protocol.md#application-update-protocol).
+
+The manual receiver 1.06 check used four direct class-05 reads of 32 bytes at `0x13000`, followed by class-05 `C3` with payload `(logical offset 0, length 128, block size 4096)`, length/total 12, and offset 0. Its six response bytes matched both checksums calculated from those reads, and its header echoed the request fields. The production `_verify_block` helper then passed checksum and complete readback verification against the existing bytes, with identical receiver identity afterward. No class-06 CRC, `C1`, erase, write, commit, reset, or mode-change command was sent. These checks validate local read-only verification, not an update transaction or the radio checksum path.
 
 The application commit handlers persist a 52-byte record but do not themselves validate the complete staged image. A separate staging area alone does not prove interrupted-update recovery. The privately read bootloader is not redistributed with this project, and a firmware identity probe does not establish safe installation.
 

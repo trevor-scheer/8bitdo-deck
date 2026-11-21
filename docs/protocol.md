@@ -1,6 +1,6 @@
 # Native protocol implementation
 
-The native backend contains an application-mode update transaction for Ultimate 2 Wireless controllers (`6012`) and receivers (`6013`). It is **not hardware-qualified**. The support registry must keep native flashing disabled until the qualification below is complete. Unit-test devices simulate the protocol and do not establish hardware compatibility.
+The native backend contains an application-mode update transaction for Ultimate 2 Wireless controllers (`6012`) and receivers (`6013`). It is **not ready for firmware installation**: no write path is hardware-qualified, and `QUALIFICATIONS` remains empty. Native flashing stays disabled until the qualification below is complete. Unit-test devices simulate the protocol and do not establish hardware compatibility.
 
 ## Evidence
 
@@ -9,6 +9,7 @@ The implementation was independently written from the observable wire format and
 - The official [web updater's connection and update module](https://web.8bitdo.com/assets/connectDevice-CqNxlsyD.js) defines the 28-byte image header, application command framing, CRC algorithm, update sequence, and separate controller/receiver handling.
 - The official [Windows updater](https://download.8bitdo.com/Tools/FirmwareUpdater/8BitDo_Firmware_Updater_Win.zip), statically inspected, defines legacy model discrimination in `DinputHid::getNewGamePadDetails`; see [archive hashes and cross-checks](research.md#desktop-identity-decoder).
 - The official [main module](https://web.8bitdo.com/assets/index-BXAl9J5z.js) defines product/catalog identities and command constants.
+- Static inspection of the official Ultimate Software V2 1.38 native DLL and controller 1.10 / receiver 1.06 firmware establishes response payload sizes, staging addresses, initialization, and commit fields. See the [artifact links, hashes, and routing evidence](wireless-updates.md#official-desktop-implementation).
 - [Firmware analysis](https://github.com/ascendedent/8bitdo-Linux-Software/blob/main/docs/firmware.md) and [captured identify traffic](https://github.com/ascendedent/8bitdo-Linux-Software/blob/main/docs/capture-log.md) corroborate the identify command, report layout, and distinctions between USB personalities. This repository has no identified license; its implementation code was not copied.
 - [Ultimate 2 configuration protocol](https://github.com/MiguelSanzBr/8bitdo-ultimate2-linux/blob/main/docs/PROTOCOL.md) reports hardware verification of version and paired-controller queries and distinguishes the edition field from a firmware product ID.
 
@@ -37,20 +38,54 @@ The sanitized live prefix `02 22 67 00 00 80 23 00` identifies the Bluetooth rec
 
 The optional [wireless identity probe](wireless-updates.md) verifies the radio updater route on receiver 1.06 / controller 1.10 without starting an update. The general paired-status query above remains display-only.
 
+An additional manual check on receiver 1.06 read 128 existing staging bytes at absolute address `0x13000` through direct USB class-05 command `05`, then requested class-05 `C3` for logical offset 0 and length 128. Both returned checksums matched those bytes. The production `_verify_block` helper also passed its checksum and complete readback checks against those existing bytes, with identical receiver identity afterward. These checks sent no initialization, erase, write, commit, reset, or mode-change command. They did not use radio class `06`, whose `C3` forwarding changes receiver update state. The app does not expose this manual memory-read procedure.
+
+## First-generation receiver limits
+
+The Ultimate Bluetooth receiver (`6008`, catalog type 42) requires a separate backend. Its official 1.04 DAT has destination `0x3000`, payload length `0x40000`, and an `80NA_R` identifier. It is not the Ultimate 2 Telink image layout.
+
+The inspected [Windows updater](https://download.8bitdo.com/Tools/FirmwareUpdater/8BitDo_Firmware_Updater_Win.zip) includes a receiver-specific HID path: boot identity, `C1` initialization, erase/write/`C3` verification, `C2` finalization, and reset. File offsets depend on initialization data, so the modern transaction and its `C4` commit cannot substitute for this path. Boot transition, partition handling, recovery, and a complete update remain unqualified.
+
+The inspected web updater includes `6008` in catalog metadata but omits it from its update-routing lists. Its `3109` identity decoder also differs from the validated desktop decoder. It is not a verified browser fallback for this receiver. Detection and catalog access do not enable installation. Proprietary updater binaries and firmware are not redistributed with this project.
+
 ## Application update protocol
 
 A request has report ID `81`, command class `05`, a 16-byte little-endian header (`command`, `parameters`, `length`, `CRC`, `total length`, `offset`), and at most 46 payload bytes. The first four fields are 16-bit integers and the last two are 32-bit integers. Data CRC is CRC-16/MODBUS, with initial value `FFFF` and reflected polynomial `A001`.
 
-Application replies have report ID `02`, class `05`, and the same header layout. The first field is a status; the second echoes the command. Bootloader framing has an additional byte and is rejected. Read-only identity and product-ID checks precede any erase command, so incompatible framing must fail before a destructive operation.
+Application replies have report ID `02`, class `05`, and the same header layout. The first field is a status; the second echoes the command. The remaining fields usually echo the request, including its length and CRC. That length does **not** necessarily describe the returned payload, and the header CRC is not a checksum of the response data.
+
+The parser uses these command-specific payload sizes:
+
+| Command | Reply length field | Actual response payload |
+| --- | --- | --- |
+| `C1` initialization | 0 | 16 bytes: initial address 0 and block size 4096 at byte 12; the two middle words are ignored |
+| `C3` verification | 12 | 6 bytes: little-endian CRC16 followed by a 32-bit additive checksum |
+| `03`, `04`, `C4` acknowledgments | Echoed request length | No payload |
+| `05` readback | Requested read length | Exactly that many bytes |
+| `08` product ID | 2 or 4 | Product ID, with total length equal to the reply length |
+
+The parser rejects oversized or truncated payloads and invalid `C1`/`C3` length fields. Each exchange checks status and command, then correlates the echoed length, CRC, total length, and offset. Product-ID responses have the explicit length exception above. Bootloader framing has an additional byte and is rejected. Read-only identity and product-ID checks precede initialization and erase.
+
+For each block of at most 4096 bytes, `C3` checks only complete 128-byte units: `floor(block_length / 128) * 128` bytes. The backend compares both checksums over that prefix, then reads back **every** byte in the block, including any remaining tail. It does not pad or discard firmware bytes to satisfy checksum alignment. A block shorter than 128 bytes has an empty checksum prefix and still receives complete readback verification.
+
+The preflight also bounds the image after rounding its size up to a 4096-byte sector:
+
+| Target | Maximum rounded payload | Boundary protected by this limit |
+| --- | --- | --- |
+| Controller `6012` | `0x2c000` | Installed image at `0x5000` ends before metadata at `0x31000` |
+| Receiver `6013` | `0xc000` | Staging at `0x13000` ends at `0x1f000`; installed image stays below metadata at `0x12000` |
+
+These are conservative bounds for the reviewed layouts, not qualification records.
 
 The transaction follows these steps:
 
 1. Require a qualification record bound to product ID, reported hardware revision (or an explicit unreported value), allowed stable source firmware versions, image revision, and exact image SHA-256. Recompute the image hash from its header and payload. Beta source firmware is not accepted.
-2. Restrict the image to the Ultimate 2 Telink layout: physical header address `5000`, bounded image length, and `KNLT` payload marker. Requery identity and verify the application-mode product ID.
-3. For each block of at most 4096 bytes, erase with command `04` and write in at most 46-byte chunks with command `03`. Application-mode addresses start at logical zero, as in the vendor sequence. This must not be used as a bootloader write routine.
-4. Compare the device's block CRC through command `C3`, then compare a complete byte-for-byte readback through command `05` at the absolute staging address (`0x32000 + offset` for controllers, `0x13000 + offset` for receivers). Correlate write and read acknowledgments with their addresses. These stricter checks must be confirmed against real target replies during qualification.
-5. Only after every block verifies, save the image length/version with command `C4` and send reset command `07` once.
-6. Return a result marked as requiring reconnect verification. The caller must reconnect to the same physical target and check the reported version before showing success.
+2. Restrict the image to the Ultimate 2 Telink layout: physical header address `0x5000`, the model-specific size bound above, the `KNLT` payload marker, and a matching embedded product ID at payload bytes 28–29. Requery identity and verify the application-mode product ID.
+3. Initialize with command `C1`, parameters 0, and length/total/offset 0. Require initial address 0 and block size 4096 in its response. Initialization belongs to the update transaction; it is not a read-only identity query.
+4. For each block of at most 4096 bytes, erase with command `04` and write in at most 46-byte chunks with command `03`. Application-mode addresses start at logical zero, as in the vendor sequence. This must not be used as a bootloader write routine.
+5. Compare both device checksums through command `C3`, then perform complete byte-for-byte readback through command `05` at the absolute staging address (`0x32000 + offset` for controllers, `0x13000 + offset` for receivers). Apply the prefix and tail rules above.
+6. Only after every block verifies, save the image length/version with command `C4`, payload length 8, total length 8, and offset 0. Send reset command `07` once.
+7. Return a result marked as requiring reconnect verification. The caller must reconnect to the same physical target and check the reported version before showing success.
 
 No erase, write, commit, or reset is retried. An exception does not trigger a reset or a success result. Recovery must follow the device-specific procedure; the transaction does not invent rollback support.
 
@@ -58,7 +93,7 @@ The application owns image download/authentication policy, device locking, suspe
 
 The job engine checks the source-reviewed records in `eightbitdo/qualifications.py`; that collection is empty in this build. It rechecks the image digest, identity, and qualification before calling the transaction, binds the opened HID node to its original USB port, and retains an update lock through reconnect verification. Status persistence after writes start is best-effort so a full disk cannot abort a partially erased device. No UI input can add a qualification.
 
-The wireless investigation also identified an unresolved CRC response mismatch: the device builds a CRC16 plus an additive checksum, while this experimental backend expects two CRC bytes. Resolve the response framing and partial-block checksum behavior before adding any write qualification. See the [wireless findings](wireless-updates.md).
+Tests model the firmware's echoed headers, actual response payload sizes, 4096-byte erase sectors, checksum quantization, and absolute staging reads. They cover both models, partial blocks, malformed replies, corrupted readback, and stopping before commit or reset on failure. The receiver check corroborates the production verification helper on 128 existing bytes. Initialization, writes, commit, reset, and a complete native update still require hardware qualification.
 
 ## First hardware qualification
 
