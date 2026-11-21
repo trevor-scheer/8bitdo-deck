@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import struct
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from .protocol import (
@@ -19,6 +19,7 @@ from .protocol import (
     DeviceIdentity,
     FirmwareImage,
     FirmwareMismatch,
+    FlashAuthorization,
     FlashQualification,
     FlashResult,
     ProtocolError,
@@ -50,6 +51,20 @@ class ReceiverInitialization:
         if len(payload) != 16:
             raise ProtocolError("Receiver initialization must contain four 32-bit fields")
         return cls(*struct.unpack("<4I", payload))
+
+
+@dataclass(frozen=True)
+class LegacySourceReviewedAuthorization(FlashAuthorization):
+    """Developer-reviewed compatibility; not a successful hardware update record.
+
+    Prefix digests bind the packaged boot code reviewed across source versions.
+    They do not claim the installed receiver's boot code has been read back.
+    """
+
+    initialization: ReceiverInitialization | None = None
+    boot_prefix_sha256: str = ""
+    boot_prefix_crc16: int | None = None
+    evidence_level: str = field(default="source-reviewed-experimental", init=False)
 
 
 @dataclass(frozen=True)
@@ -186,14 +201,56 @@ def plan_receiver_flash(image: FirmwareImage, initialization: ReceiverInitializa
     return ReceiverFlashPlan(skip, image.payload[skip:])
 
 
+def validate_receiver_authorization(
+    image: FirmwareImage,
+    identity: DeviceIdentity,
+    authorization: FlashQualification | LegacySourceReviewedAuthorization,
+    *,
+    expected_initialization: ReceiverInitialization | None = None,
+) -> ReceiverInitialization:
+    """Validate an experimental or hardware binding without opening any device."""
+    _validate_image(image)
+    if type(authorization) not in (FlashQualification, LegacySourceReviewedAuthorization):
+        raise UnsupportedProtocol("Receiver writes require an explicit reviewed authorization type")
+    if isinstance(authorization, LegacySourceReviewedAuthorization):
+        if expected_initialization is None:
+            expected_initialization = authorization.initialization
+        if authorization.initialization is None or authorization.initialization != expected_initialization:
+            raise FirmwareMismatch("Receiver initialization is not bound to the source review")
+        # This is artifact verification, not a claim of live bootloader readback.
+        prefix = image.payload[:expected_initialization.image_offset]
+        if (
+            not prefix
+            or hashlib.sha256(prefix).hexdigest() != authorization.boot_prefix_sha256
+            or crc16(prefix) != authorization.boot_prefix_crc16
+        ):
+            raise FirmwareMismatch("Receiver boot prefix differs from the source-reviewed artifact")
+    if expected_initialization is None:
+        raise UnsupportedProtocol("Receiver hardware qualification must supply its initialization tuple")
+    if identity.product_id != RECEIVER_PID or not identity.target_verified:
+        raise UnsupportedProtocol("Receiver update requires a verified runtime identity")
+    if (
+        authorization.product_id != RECEIVER_PID
+        or authorization.hardware_revision != identity.hardware_revision
+        or authorization.image_revision != image.revision
+        or authorization.image_sha256 != image.sha256
+        or not authorization.evidence.strip()
+        or identity.version_raw not in authorization.source_versions
+        or identity.beta != 0
+    ):
+        raise FirmwareMismatch("Receiver firmware, identity, and authorization do not match")
+    plan_receiver_flash(image, expected_initialization)
+    return expected_initialization
+
+
 def flash_boot_receiver(
     transport: ReportTransport,
     image: FirmwareImage,
     *,
     identity: DeviceIdentity,
     boot_usb_pid: int,
-    qualification: FlashQualification,
-    expected_initialization: ReceiverInitialization,
+    qualification: FlashQualification | LegacySourceReviewedAuthorization,
+    expected_initialization: ReceiverInitialization | None = None,
     progress: Callable[[str, int, int], None] | None = None,
 ) -> FlashResult:
     """Update an already connected, externally qualified receiver boot interface.
@@ -203,19 +260,9 @@ def flash_boot_receiver(
     configures the bootloader update session. Failures never retry destructive
     commands, finalize, or reset automatically.
     """
-    _validate_image(image)
-    if identity.product_id != RECEIVER_PID or not identity.target_verified:
-        raise UnsupportedProtocol("Receiver update requires a verified runtime identity")
-    if (
-        qualification.product_id != RECEIVER_PID
-        or qualification.hardware_revision != identity.hardware_revision
-        or qualification.image_revision != image.revision
-        or qualification.image_sha256 != image.sha256
-        or not qualification.evidence.strip()
-        or identity.version_raw not in qualification.source_versions
-        or identity.beta != 0
-    ):
-        raise FirmwareMismatch("Receiver firmware, identity, and qualification do not match")
+    expected_initialization = validate_receiver_authorization(
+        image, identity, qualification, expected_initialization=expected_initialization,
+    )
     plan = plan_receiver_flash(image, expected_initialization)
     if query_boot_target(transport, usb_pid=boot_usb_pid) != RECEIVER_PID:
         raise FirmwareMismatch("Bootloader belongs to another 8BitDo model")

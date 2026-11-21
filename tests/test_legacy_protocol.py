@@ -1,14 +1,15 @@
+import hashlib
 import struct
 import unittest
 from dataclasses import replace
 
 from eightbitdo.legacy_protocol import (
-    BOOT_ENTRY_REPORT, ReceiverInitialization, build_boot_command,
+    BOOT_ENTRY_REPORT, LegacySourceReviewedAuthorization, ReceiverInitialization, build_boot_command,
     flash_boot_receiver, parse_boot_reply, plan_receiver_flash,
-    query_boot_target, request_receiver_boot, reset_receiver_boot,
+    query_boot_target, request_receiver_boot, reset_receiver_boot, validate_receiver_authorization,
 )
 from eightbitdo.protocol import (
-    DeviceIdentity, FirmwareMismatch, FlashQualification, ProtocolError,
+    DeviceIdentity, FirmwareMismatch, FlashAuthorization, FlashQualification, ProtocolError,
     ProtocolTimeout, UnsupportedProtocol, crc16, parse_firmware,
 )
 
@@ -211,6 +212,50 @@ class LegacyProtocolTests(unittest.TestCase):
                          [(8192, 4096, 0), (12288, 4096, 0), (0, 4096, 0), (4096, 4096, 0)])
         self.assertEqual(result.bytes_verified, 16384)
         self.assertTrue(result.needs_reconnect_verification)
+
+    def experimental_authorization(self, image):
+        prefix = image.payload[:INITIALIZATION.image_offset]
+        return LegacySourceReviewedAuthorization(
+            0x6008, None, 0, image.sha256, "synthetic source-review fixture only", (103,),
+            INITIALIZATION, hashlib.sha256(prefix).hexdigest(), crc16(prefix),
+        )
+
+    def test_experimental_source_review_is_explicit_and_validates_before_device_io(self):
+        image = firmware()
+        authorization = self.experimental_authorization(image)
+        self.assertEqual(authorization.evidence_level, "source-reviewed-experimental")
+        self.assertEqual(validate_receiver_authorization(image, IDENTITY, authorization), INITIALIZATION)
+        device = ReceiverDevice(image)
+        flash_boot_receiver(device, image, identity=IDENTITY, boot_usb_pid=0x3208,
+                            qualification=authorization)
+        self.assertEqual(device.commands[-1], 7)
+
+    def test_bad_experimental_bindings_never_send_even_a_boot_query(self):
+        image = firmware()
+        authorization = self.experimental_authorization(image)
+        for changed in (
+            replace(authorization, initialization=None),
+            replace(authorization, initialization=replace(INITIALIZATION, image_offset=0x1000)),
+            replace(authorization, boot_prefix_sha256="0" * 64),
+            replace(authorization, boot_prefix_crc16=authorization.boot_prefix_crc16 ^ 1),
+            replace(authorization, source_versions=(102,)),
+            replace(authorization, image_sha256="0" * 64),
+            replace(authorization, evidence=""),
+            FlashAuthorization(0x6008, None, 0, image.sha256, "untyped", (103,)),
+        ):
+            device = QueueTransport()
+            with self.subTest(authorization=changed), self.assertRaises((FirmwareMismatch, UnsupportedProtocol)):
+                flash_boot_receiver(device, image, identity=IDENTITY, boot_usb_pid=0x3208,
+                                    qualification=changed)
+            self.assertEqual(device.sent, [])
+
+    def test_caller_cannot_override_experimental_initialization(self):
+        image = firmware()
+        with self.assertRaises(FirmwareMismatch):
+            validate_receiver_authorization(
+                image, IDENTITY, self.experimental_authorization(image),
+                expected_initialization=replace(INITIALIZATION, upgrade_length=0x40000),
+            )
 
     def test_wrong_qualification_never_touches_device(self):
         image = firmware()

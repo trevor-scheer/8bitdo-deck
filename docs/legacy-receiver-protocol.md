@@ -212,6 +212,38 @@ a readback of the installed receiver. Application updates skip the boot
 prefix. No recovery after erase or power loss has been performed on the
 user's receiver.
 
+## Experimental authorization and connection handoff
+
+`LegacySourceReviewedAuthorization` is distinct from `FlashQualification`.
+It binds an exact DAT SHA-256, permitted source versions, hardware/image
+revision, immutable expected initialization tuple, and boot-prefix SHA-256 and
+CRC-16/MODBUS. Its evidence level is `source-reviewed-experimental`. Neither a
+catalog result nor a UI-selected model may construct a record.
+
+For the four official releases, the first `4000` payload bytes have SHA-256
+`4f9f771cd34c7147a9123c35f2aac3d397396071c58c9f6571b9efccfc64dc81`
+and CRC-16/MODBUS `1ecd`. These checks identify the reviewed packaged artifact;
+they do not read or authenticate the installed receiver's bootloader.
+`validate_receiver_authorization` performs these checks before any device
+operation. The backend repeats them and requires the actual `C1` response to
+match all four authorized initialization fields before erase.
+
+An initial user-run update can therefore be authorized explicitly as an
+experimental source-reviewed transaction, without inventing a previous
+successful flash. The service must preserve that label and disclose its
+remaining hardware/recovery limits. No enabled authorization record is
+provided by this backend. Boot entry belongs only to the confirmed update
+transaction because of the conditional migration behavior described above;
+it is not part of ordinary discovery or a supposedly read-only preview.
+
+`connection.require_boot_access` checks setup and runtime access before entry.
+`wait_for_boot` opens only a boot interface on the original physical USB port,
+using the transport's fd-based USB and descriptor checks. Shared boot USB
+PID `3208` or `3002` never supplies a firmware identity. The backend must still
+query its target. `wait_for_application` checks that same port's verified
+runtime target and exact stable firmware version after reset. A timeout or
+wrong identity cannot mark an update complete.
+
 ## Qualification still required
 
 Before the service enables a receiver update, record the actual runtime-to-boot
