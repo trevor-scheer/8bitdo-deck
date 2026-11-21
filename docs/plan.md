@@ -15,7 +15,7 @@ The Decky plugin uses a reusable Python engine and CLI. A standalone app can reu
 - Background jobs, per-target locks, suspend inhibition, persistent progress, targeted legacy fwupd installation, and reconnect/version checks.
 - Ultimate 2 application transactions with metadata guards, source fingerprint checks for experimental authorization, per-block verification, and a second complete verification pass before commit.
 - A separate original Bluetooth receiver transaction integrated into the service, with authorization checks before boot entry, descriptor and firmware identity checks, and handoff on the same physical USB port. See the [legacy protocol](legacy-receiver-protocol.md).
-- Recovery USB access setup through normal `pkexec` authorization. Rules apply only to hidraw boot identities `2dc8:3208` and `2dc8:3002`; see [installation](install.md).
+- Automatic recognition of SteamOS’s trusted recovery access policy, plus actual interface access checks. Other Linux systems can use the scoped `pkexec` fallback for hidraw boot identities `2dc8:3208` and `2dc8:3002`; see [installation](install.md).
 - An experimental Ultimate 2 receiver recovery helper that inspects state before permitting reset. A reset can install a valid pending image; see the [recovery contract](receiver-recovery.md).
 
 `SourceReviewedAuthorization` and `LegacySourceReviewedAuthorization` describe experimental transactions. `FlashQualification` describes a demonstrated hardware update. All three registries remain empty; UI choices and catalog results cannot populate them. See the [authorization requirements](protocol.md#authorization-and-hardware-qualification).
@@ -24,11 +24,11 @@ The Decky plugin uses a reusable Python engine and CLI. A standalone app can reu
 
 Read-only identification passed on both generations of receiver. Ultimate 2 paired status and the bounded radio identity/read path passed through receiver 1.06. Private reads obtained the receiver 1.01 application and both receiver bootloaders; the bootloaders are byte-identical. Private binaries and disassembly are not distributed.
 
-The Ultimate 2 receiver running 1.01 entered recovery as `2dc8:3208` with the expected descriptor, but `EACCES` prevented GET_PID and reset. **The recovery round trip has not passed.** Administrator authorization and a physical power cycle await user action. The original Bluetooth receiver's boot transition, live initialization tuple, and recovery remain untested. Simulated tests establish host behavior, not recovery from interrupted writes.
+The Ultimate 2 receiver running 1.01 entered recovery as `2dc8:3208`. After an initial `EACCES`, production `wait_for_boot` opened it as the desktop user under SteamOS’s existing policy, verified its original port and report layout, and sent no USB reports. No project rules or receipt were installed. The earlier access failure’s cause remains unknown; administrator setup and a physical power cycle are not required. **Boot GET_PID/reset and the recovery round trip remain unverified.** The original Bluetooth receiver’s boot transition, live initialization tuple, and recovery remain untested. Simulated tests establish host behavior, not recovery from interrupted writes.
 
 ## Remaining work
 
-1. Complete recovery access setup and physically reconnect the affected Ultimate 2 receiver. Verify boot identity, reset, and return to the expected runtime version before claiming a completed round trip.
+1. With boot access established, verify the Ultimate 2 receiver’s boot identity, reset, and return to the expected runtime version before claiming a completed recovery round trip.
 2. Review each proposed experimental authorization against the exact source version, destination image, model/role, and recovery evidence. Keep source-reviewed records distinct from hardware qualifications and disclose unresolved limits.
 3. Have Trevor run an explicitly authorized update on one exact target at a time. Verify the reported destination version and normal operation afterward; record failures without retrying destructive commands blindly. Wireless transfer requires separate validation.
 4. Validate SteamOS installation and upgrades, then broaden family support with corresponding protocol and hardware evidence. Preserve calibration and identity regions according to each protocol; do not infer a universal recovery or rollback mechanism.

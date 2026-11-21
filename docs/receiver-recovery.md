@@ -2,7 +2,7 @@
 
 `eightbitdo.recovery` inspects the Ultimate 2 Wireless receiver (`6013`) in its USB bootloader and can request one reset after verifying its state. It does not initialize, erase, write, or commit firmware. **Resetting a verified pending update causes the vendor bootloader to copy staged firmware into the application area.** The helper returns a result that still requires reconnect verification.
 
-This is source-reviewed experimental support, not a hardware-validated recovery procedure. The observed recovery test reached the expected USB boot personality and descriptor, but Linux denied access before the boot identity query or reset. A completed recovery roundtrip and interrupted-update recovery have not been demonstrated. The plugin exposes a recovery check and separately confirmed recovery action for eligible interrupted install jobs. All authorization registries remain empty, so this build enables no recovery jobs.
+This is source-reviewed experimental support, not a hardware-validated recovery procedure. The receiver reached the expected USB boot personality. Although the initial check failed with `EACCES`, production `wait_for_boot` later opened it as the desktop user using SteamOS’s existing policy, verified the original USB port and report layout, and sent no USB reports. No project rules or receipt were installed. The earlier failure’s cause remains unknown. Boot GET_PID/reset, a completed recovery round trip, and interrupted-update recovery have not been demonstrated. The plugin exposes a recovery check and separately confirmed recovery action for eligible interrupted install jobs. All authorization registries remain empty, so this build enables no recovery jobs.
 
 ## Service and plugin flow
 
@@ -12,7 +12,7 @@ Recovery is limited to failed or blocked Ultimate 2 receiver install jobs that p
 - After a check permits reset, **Confirm receiver recovery** calls `recover_update(job_id, confirmed=True)`. This starts a background worker with suspend inhibition. The worker repeats the job, image, authorization, port, and device-state checks before calling `finish_recovery`; an earlier successful check cannot bypass reinspection.
 - After reset, the worker checks the same receiver's runtime identity and version. The target version completes the job. Returning to the original version leaves the update blocked as incomplete. A timeout stays blocked; reset is not retried.
 
-Recovery access must already be configured through the [normal administrator setup](install.md#receiver-recovery-access). The service requires boot USB PID `3208`, the reviewed report layout, and verified firmware PID `6013`; a shared USB PID alone is insufficient. Recovery does not request a mode transition or begin a new firmware transfer.
+Recovery requires verified access through the trusted SteamOS policy or the [scoped fallback setup](install.md#receiver-recovery-access). Normal SteamOS needs no administrator setup or terminal command; actual boot-node access is checked within a bounded wait. The service requires boot USB PID `3208`, the reviewed report layout, and verified firmware PID `6013`; a shared USB PID alone is insufficient. Recovery does not request a mode transition or begin a new firmware transfer.
 
 ## Protocol helper interface
 
