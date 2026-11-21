@@ -1,0 +1,11 @@
+{
+  "name": "8BitDo Deck",
+  "author": "trevor-scheer",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["controllers", "firmware", "8bitdo"],
+    "description": "Discover 8BitDo devices, inspect firmware releases, and access supported update paths from Steam Deck.",
+    "image": "https://opengraph.githubassets.com/1/trevor-scheer/8bitdo-deck"
+  }
+}
