@@ -10,9 +10,14 @@ from pathlib import Path
 
 from .catalog import Catalog
 from .access import RecoveryAccess
+from .connection import require_boot_access, wait_for_boot
 from .discovery import Device, clean_text, discover, inspect_device
 from .fwupd import Fwupd, FwupdError
 from .jobs import ACTIVE_STATES, JobStore, default_state_dir, public_job
+from .legacy_protocol import (
+    LegacySourceReviewedAuthorization, flash_boot_receiver, request_receiver_boot,
+    validate_receiver_authorization,
+)
 from .protocol import flash_application, parse_firmware, query_identity, verify_authorization_sources
 from .qualifications import qualification_for
 from .registry import MODELS, get_model
@@ -234,7 +239,10 @@ class Service:
                 if authorization is not None:
                     job.update(evidence_level=authorization.evidence_level, evidence=authorization.evidence)
                     if self.recovery_access.status()['configured']:
-                        verify_authorization_sources(transport, image, identity=identity, qualification=authorization)
+                        if isinstance(authorization, LegacySourceReviewedAuthorization):
+                            validate_receiver_authorization(image, identity, authorization)
+                        else:
+                            verify_authorization_sources(transport, image, identity=identity, qualification=authorization)
                         job.update(state="ready", can_install=True, original_version=identity.version,
                                    message="Firmware and device checks passed. Review the target, evidence level, and version before installing.")
                     else:
@@ -296,7 +304,12 @@ class Service:
                 raise ValueError("The target or its hardware qualification changed. Prepare the update again.")
             if job.get('evidence_level') != qualification.evidence_level:
                 raise ValueError("The update evidence changed. Prepare and review the update again.")
+            legacy_receiver = isinstance(qualification, LegacySourceReviewedAuthorization)
+            if legacy_receiver:
+                validate_receiver_authorization(image, identity, qualification)
+                require_boot_access(device)
             job.update(state="installing", progress=0, can_install=False,
+                       original_version_raw=identity.version_raw,
                        message="Installing the reviewed image. Keep the device connected.")
             self.store.save(job)
 
@@ -309,7 +322,16 @@ class Service:
                     # device. The initial durable job record precedes all writes.
                     self._save_progress(job)
 
-            flash_application(transport, image, identity=identity, qualification=qualification, progress=progress)
+            if legacy_receiver:
+                progress('entering update mode', 0, len(image.payload))
+                request_receiver_boot(transport, identity=identity)
+            else:
+                flash_application(transport, image, identity=identity, qualification=qualification, progress=progress)
+        if legacy_receiver:
+            # The runtime fd and its lock must close before opening the new HID node.
+            with wait_for_boot(device, self.state_dir / 'locks') as boot:
+                flash_boot_receiver(boot.transport, image, identity=identity, boot_usb_pid=boot.usb_pid,
+                                    qualification=qualification, progress=progress)
         job.update(state="verifying", progress=95, message="Waiting for the same USB target and checking its firmware version.")
         self._save_progress(job)
         deadline = time.monotonic() + 30

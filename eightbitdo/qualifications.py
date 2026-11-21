@@ -5,16 +5,19 @@ Neither downloaded metadata nor a UI request may populate this collection.
 """
 
 from .protocol import DeviceIdentity, FirmwareImage, FlashAuthorization, FlashQualification, SourceReviewedAuthorization
+from .legacy_protocol import LegacySourceReviewedAuthorization
 
 
 QUALIFICATIONS: tuple[FlashQualification, ...] = ()
 SOURCE_REVIEWED_AUTHORIZATIONS: tuple[SourceReviewedAuthorization, ...] = ()
+LEGACY_SOURCE_REVIEWED_AUTHORIZATIONS: tuple[LegacySourceReviewedAuthorization, ...] = ()
 
 
 def qualification_for(image: FirmwareImage, identity: DeviceIdentity) -> FlashAuthorization | None:
     if not identity.target_verified:
         return None
-    return next((entry for entry in (*QUALIFICATIONS, *SOURCE_REVIEWED_AUTHORIZATIONS) if (
+    records = (*QUALIFICATIONS, *SOURCE_REVIEWED_AUTHORIZATIONS, *LEGACY_SOURCE_REVIEWED_AUTHORIZATIONS)
+    return next((entry for entry in records if (
         entry.product_id == identity.product_id == image.product_id
         and entry.hardware_revision == identity.hardware_revision
         and entry.image_revision == image.revision

@@ -13,6 +13,8 @@ from eightbitdo.jobs import JobStore
 from eightbitdo.service import Service
 from eightbitdo.protocol import DeviceIdentity, FlashQualification, parse_firmware
 from eightbitdo.qualifications import qualification_for
+from eightbitdo.legacy_protocol import LegacySourceReviewedAuthorization, ReceiverInitialization
+from eightbitdo.protocol import crc16
 
 
 class ServiceTests(unittest.TestCase):
@@ -186,6 +188,90 @@ class ServiceTests(unittest.TestCase):
     def test_default_qualification_registry_enables_no_native_writes(self):
         image = parse_firmware(self.image)
         self.assertIsNone(qualification_for(image, DeviceIdentity(0x6013, 105)))
+
+    def legacy_job(self):
+        job = self.native_job()
+        payload = bytearray(0x6000)
+        payload[16:22] = b'80NA_R'
+        data = struct.pack('<7I', 104, 0x3000, len(payload), 0x6008, 0, 0, 0) + payload
+        Path(job['artifact_path']).write_bytes(data)
+        job.update(model_id='ultimate-bluetooth-receiver', version='1.04', original_version='1.03',
+                   sha256=hashlib.sha256(data).hexdigest(), evidence_level='source-reviewed-experimental')
+        authorization = LegacySourceReviewedAuthorization(
+            0x6008, None, 0, job['sha256'], 'Synthetic service fixture, not hardware evidence', (103,),
+            initialization=ReceiverInitialization(0x4000, 0xFFFFFFFF, 0, 4096),
+            boot_prefix_sha256=hashlib.sha256(payload[:0x4000]).hexdigest(),
+            boot_prefix_crc16=crc16(payload[:0x4000]),
+        )
+        device = Device(job['device_id'], 'Receiver', '2dc8', '3109', model_id=job['model_id'],
+                        firmware_version='1.04', hid_paths=[Path('/dev/fake')], usb_path='/sys/devices/fake/1-1')
+        return job, device, authorization
+
+    def test_legacy_preparation_discloses_experimental_evidence_without_mode_change(self):
+        job, device, authorization = self.legacy_job()
+        release = replace(self.release, catalog_type=42, version='1.04')
+        self.catalog.list_releases.return_value = [release]
+        self.catalog.download.return_value = Artifact(job['artifact_path'], job['sha256'], release, False, 'Fixture')
+        with patch.object(self.service, '_native_device', return_value=device), \
+                patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+                patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6008, 103)), \
+                patch('eightbitdo.service.qualification_for', return_value=authorization), \
+                patch('eightbitdo.service.request_receiver_boot') as enter, \
+                patch('eightbitdo.service.verify_authorization_sources') as modern_verify:
+            self.service.run_prepare(job)
+        result = self.service.get_job(job['id'])
+        self.assertEqual(result['state'], 'ready')
+        self.assertTrue(result['can_install'])
+        self.assertEqual(result['evidence_level'], 'source-reviewed-experimental')
+        self.assertEqual(result['evidence'], authorization.evidence)
+        enter.assert_not_called()
+        modern_verify.assert_not_called()
+
+    def test_legacy_install_closes_runtime_before_boot_and_verifies_reconnect(self):
+        job, device, authorization = self.legacy_job()
+        events = []
+        runtime = MagicMock()
+        runtime.__enter__.side_effect = lambda: events.append('runtime open') or runtime
+        runtime.__exit__.side_effect = lambda *args: events.append('runtime closed')
+        boot = MagicMock()
+        boot.usb_pid = 0x3208
+        boot_context = MagicMock()
+        def open_boot():
+            self.assertEqual(events[-1], 'runtime closed')
+            events.append('boot open')
+            return boot
+        boot_context.__enter__.side_effect = open_boot
+        with patch.object(self.service, '_native_device', return_value=device) as reconnect, \
+                patch('eightbitdo.service.HidrawTransport', return_value=runtime), \
+                patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6008, 103)), \
+                patch('eightbitdo.service.qualification_for', return_value=authorization), \
+                patch('eightbitdo.service.require_boot_access') as access, \
+                patch('eightbitdo.service.request_receiver_boot') as enter, \
+                patch('eightbitdo.service.wait_for_boot', return_value=boot_context), \
+                patch('eightbitdo.service.flash_boot_receiver') as legacy_flash, \
+                patch('eightbitdo.service.flash_application') as modern_flash:
+            self.service.run_install(job)
+        access.assert_called_once_with(device)
+        enter.assert_called_once()
+        legacy_flash.assert_called_once()
+        self.assertEqual(legacy_flash.call_args.kwargs['boot_usb_pid'], 0x3208)
+        modern_flash.assert_not_called()
+        self.assertEqual(reconnect.call_count, 2)
+        self.assertEqual(self.service.get_job(job['id'])['state'], 'complete')
+
+    def test_legacy_permission_preflight_failure_never_changes_mode(self):
+        job, device, authorization = self.legacy_job()
+        with patch.object(self.service, '_native_device', return_value=device), \
+                patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+                patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6008, 103)), \
+                patch('eightbitdo.service.qualification_for', return_value=authorization), \
+                patch('eightbitdo.service.require_boot_access', side_effect=PermissionError('Recovery access absent')), \
+                patch('eightbitdo.service.request_receiver_boot') as enter, \
+                patch('eightbitdo.service.flash_boot_receiver') as flash:
+            with self.assertRaises(PermissionError):
+                self.service.run_install(job)
+        enter.assert_not_called()
+        flash.assert_not_called()
 
     def test_native_install_requires_qualification_again(self):
         job = self.native_job()
