@@ -1,6 +1,6 @@
 # Wireless firmware update investigation
 
-Investigated on 2026-11-21. **The Ultimate 2 Wireless controller has a real update channel through its USB receiver.** A read-only firmware identity query and application-memory read succeeded over that channel on Steam Deck. A separate direct USB receiver checksum query also succeeded. No update initialization, firmware erase, write, commit, reset, or mode-change command was sent. Native installation remains disabled, with an empty qualification registry; this build is not ready for firmware installation.
+Investigated on 2026-11-21. **The Ultimate 2 Wireless controller has a real update channel through its USB receiver.** A read-only firmware identity query and application-memory read succeeded over that channel on Steam Deck. A separate direct USB receiver checksum query also succeeded. Later, receiver 1.01 entered USB recovery, but access denial prevented GET_PID/reset: the recovery round trip has **not passed**. No firmware image erase, write, or commit was sent. Native installation remains disabled; all hardware qualification and source-reviewed authorization registries are empty.
 
 ## Live results
 
@@ -13,6 +13,7 @@ Two Ultimate 2 controllers connected wirelessly after being powered on. Their re
 | Radio updater PID through receiver 1.06 | Controller PID `6012`; direct receiver query returns `6013` |
 | Radio read of 32 bytes at controller address `0x5000` | Exact match to the official controller 1.10 image header |
 | Radio read of controller bootloader, addresses `0..0x4fff` | 20 KiB read successfully for private recovery analysis; version and battery status unchanged afterward |
+| Direct USB reads of receiver 1.01 application and both receiver bootloaders | Read successfully for private analysis; the 1.01 and 1.06 bootloaders are byte-identical |
 | Direct USB class-05 `C3` on receiver 1.06 | CRC16 and additive checksum matched 128 existing staging bytes read at absolute address `0x13000`; receiver remained at 1.06 |
 | Production `_verify_block` on those existing receiver bytes | Checksum and complete readback verification passed; receiver identity unchanged afterward |
 
@@ -70,11 +71,11 @@ Write, erase, and CRC commands add a model-specific staging base to their logica
 | Controller `6012`, firmware 1.10 | `0x32000` | `0x31000` |
 | Receiver `6013`, firmware 1.06 | `0x13000` | `0x12000` |
 
-Therefore readback must use `staging_base + logical_write_offset`. Adding the DAT image address `0x5000` again is incorrect for this vendor transfer branch. This investigation corrected that address handling in the disabled native backend and added regressions for both targets across multiple blocks.
+Readback uses `staging_base + logical_write_offset`, without adding the DAT image address `0x5000`. Tests cover both targets across multiple blocks.
 
-The audit corrected verification framing in the disabled native backend. Firmware `C3` handlers return six bytes—CRC16 plus a 32-bit additive checksum—while echoing the request's length field of 12. They also echo its CRC, total length, and offset. The parser now separates declared length from actual payload size and validates the echoed fields. `C1` likewise returns 16 bytes while echoing a length of 0; write, erase, and commit acknowledgments carry no payload despite their echoed lengths.
+The native backend follows the reviewed verification framing. Firmware `C3` handlers return six bytes—CRC16 plus a 32-bit additive checksum—while echoing the request's length field of 12. They also echo its CRC, total length, and offset. The parser now separates declared length from actual payload size and validates the echoed fields. `C1` likewise returns 16 bytes while echoing a length of 0; write, erase, and commit acknowledgments carry no payload despite their echoed lengths.
 
-For blocks of at most 4096 bytes, the firmware checks `floor(length / 128) * 128` bytes. The backend compares both checksums over that prefix and verifies all bytes, including the tail, by absolute readback. Tests model these firmware behaviors for both targets. Preflight now checks the embedded product ID and conservative model-specific flash bounds; see the [native protocol contract](protocol.md#application-update-protocol).
+For blocks of at most 4096 bytes, the firmware checks `floor(length / 128) * 128` bytes. The backend compares both checksums over that prefix and verifies all bytes, including the tail, by absolute readback. After all writes, the backend repeats checksum and complete readback verification across every block before commit. Preflight checks the embedded product ID, conservative model-specific bounds, and existing metadata; damaged metadata or a pending staged update blocks initialization. Experimental `SourceReviewedAuthorization` records also require complete bootloader and installed-application fingerprints, checked during preparation and again before updating. See the [native protocol contract](protocol.md#application-update-protocol).
 
 The manual receiver 1.06 check used four direct class-05 reads of 32 bytes at `0x13000`, followed by class-05 `C3` with payload `(logical offset 0, length 128, block size 4096)`, length/total 12, and offset 0. Its six response bytes matched both checksums calculated from those reads, and its header echoed the request fields. The production `_verify_block` helper then passed checksum and complete readback verification against the existing bytes, with identical receiver identity afterward. No class-06 CRC, `C1`, erase, write, commit, reset, or mode-change command was sent. These checks validate local read-only verification, not an update transaction or the radio checksum path.
 
@@ -87,11 +88,15 @@ Private inspection of the live controller's bootloader established several recov
 - Metadata at `0x31000` is 52 bytes, with CRC-16/MODBUS over the first 48 bytes. Invalid metadata is rejected.
 - The pending-update handler (`0x0c0c`) checks the pending marker and length. Copying (`0x0b5c`) checks the staged PID, leaves staging intact, and copies later sectors before copying the application's first sector last. The persistent pending marker remains until copying finishes, allowing a reboot to attempt copying again.
 - The pending marker is cleared **before** the installed-image checksum check. The copy loop does not perform its own byte-for-byte readback. This is not proof of recovery from flash programming faults.
-- Failed image validation can enter USB recovery (initialization `0x1548`, polling `0x2884`) with VID/PID `2dc8:3208`. Recovery flash operations reject addresses below `0x5000`, protecting the bootloader region. This recovery mode was not entered or tested on hardware.
+- Failed image validation can enter USB recovery (initialization `0x1548`, polling `0x2884`) with VID/PID `2dc8:3208`. Recovery flash operations reject addresses below `0x5000`, protecting the bootloader region. The controller's recovery mode was not entered or tested on hardware.
 
 The 1.10 payload fits between the installed base and the metadata/staging regions. A larger image must not inherit that assumption: image hash, length, and safe geometry belong in its qualification record. ROM flash primitives lie outside the read bootloader region, so their electrical failure behavior was not established.
 
-These findings support recovery from ordinary power interruption during copying, but no power-loss test, firmware write, rollback, or USB rescue was performed. Both controllers already run the latest stable 1.10 release available from the inspected catalog. Reflashing them was unnecessary for confirming the radio path.
+These findings describe mechanisms for retrying an interrupted copy; they do not demonstrate power-loss safety. No power-loss test, firmware write, rollback, or completed USB rescue was performed. Both controllers already run the latest stable 1.10 release available from the inspected catalog. Reflashing them was unnecessary for confirming the radio path.
+
+The separate [Ultimate 2 receiver recovery helper](receiver-recovery.md) checks boot identity, reviewed bootloader bytes, metadata, and installed or staged firmware before allowing one reset. Reset can cause the vendor bootloader to install a pending image; it is not universally read-only. Its simulated tests establish host gating, not hardware recovery.
+
+The receiver running 1.01 reached USB `2dc8:3208` with the expected unnumbered 64-byte descriptor. Linux returned `EACCES` before GET_PID or reset, so neither boot target verification nor return to runtime was completed. Normal administrator authorization for the narrowly scoped udev setup and a physical power cycle remain pending. Private dumps and disassembly are not distributed.
 
 ## Bluetooth possibilities
 
@@ -101,6 +106,8 @@ The OTA characteristic's ordinary read has no custom callback and returns a one-
 
 For the original Ultimate Bluetooth 80NA, the [official legacy Android APK](https://download.8bitdo.com/Ultimate-Software/8BitDo-Ultimate-Software-for-Android.apk), version 1.4.0, contains historical BLE updater code and an explicit type-41 update screen. SHA-256: `2f612ee0cdd8586b1a14e85171d857969b2ad0e4273390fea6f2bd03615e3eb1`. Advertised names `80NA`/`80NA_S` map to PID `6007` and configuration service `ff10`; the bootloader uses name `8bt` and service `ff20`. Current update-screen reachability and recovery have not been established. Those artifacts do not yet justify a Bluetooth firmware write.
 
-## Qualification still required
+## Validation still required
 
-Before enabling wireless installation, validate the statically identified bootloader recovery paths on hardware and account for interrupted metadata/copy behavior. Then validate the full radio transfer, error handling, commit, reconnect identity, and normal controller operation. Keep receiver and controller firmware separate, and do not extend results to another receiver version or controller family without evidence.
+Source-reviewed experimental authorization and hardware qualification are separate evidence levels; neither registry contains an enabled record. Complete the receiver recovery round trip after access setup and physical reconnection. Wireless installation additionally needs its own reviewed transport and recovery path, full radio transfer, error handling, commit, reconnect identity, and normal controller-operation checks. A successful direct receiver query does not establish those behaviors.
+
+Keep receiver and controller firmware separate, and do not extend results to another receiver version or controller family without evidence. An experimental update must remain labeled as such until hardware evidence supports a `FlashQualification`.

@@ -1,42 +1,36 @@
 # Implementation plan
 
-Status: Decky-first direction and initial two-pair scope approved on 2026-11-21. The first plugin, CLI, catalog, job engine, legacy fwupd integration, and experimental native protocol are implemented. Read-only discovery passed on the connected Deck receivers. First-generation Bluetooth receiver identification and Ultimate 2 wireless status/identity reads are validated. Native firmware writes, direct-controller testing, and wireless recovery qualification remain outstanding. An experimental flash requires an identified target, a validated image, and a reviewable recovery procedure.
+Status on 2026-11-21: the Decky plugin, Python CLI, catalog, job engine, fwupd integration, and native transaction backends are implemented. **Native installation remains disabled:** all authorization registries are empty. No firmware image erase, write, or commit has been sent during validation.
 
 ## Product scope
 
-Build a Decky plugin for Gaming Mode backed by a reusable Linux update engine and command-line interface. A standalone app can use the same engine later. Users should not need to know which official updater handles their model.
+Provide one Steam Deck interface that identifies controllers and receivers automatically, selects the matching official firmware, and explains connection requirements. Start with the owned Ultimate Bluetooth and Ultimate 2 Wireless controller/receiver pairs. Extend support to other controllers and accessories through explicit model and protocol evidence; unknown devices stay visible without an installation claim.
 
-Start with the two owned controller/receiver pairs. Expand to other controllers, USB adapters, retro receivers, keyboards, and other accessories through explicit support entries. Display unknown and unvalidated devices honestly rather than treating brand detection as firmware compatibility.
+The Decky plugin uses a reusable Python engine and CLI. A standalone app can reuse that engine later. The official web updater remains an optional launcher, not a verified update route for every cataloged model.
 
-First evaluate the official web updater on these models. Its public WebHID implementation may provide enough protocol evidence to avoid reverse engineering desktop binaries for some families. A browser route may solve the immediate need, but must be tested on SteamOS and does not establish complete brand coverage.
+## Implemented
 
-## Proposed components
+- USB/HID discovery, verified identity and version queries, separate controller/receiver entries, and sanitized diagnostics. The original Bluetooth receiver is identified by its model tag; manual selection cannot override a mismatch.
+- Official catalogs, bounded downloads, image structure and target checks, and local SHA-256 receipts. Local hashes bind bytes but do not prove vendor authenticity.
+- Background jobs, per-target locks, suspend inhibition, persistent progress, targeted legacy fwupd installation, and reconnect/version checks.
+- Ultimate 2 application transactions with metadata guards, source fingerprint checks for experimental authorization, per-block verification, and a second complete verification pass before commit.
+- A separate original Bluetooth receiver transaction integrated into the service, with authorization checks before boot entry, descriptor and firmware identity checks, and handoff on the same physical USB port. See the [legacy protocol](legacy-receiver-protocol.md).
+- Recovery USB access setup through normal `pkexec` authorization. Rules apply only to hidraw boot identities `2dc8:3208` and `2dc8:3002`; see [installation](install.md).
+- An experimental Ultimate 2 receiver recovery helper that inspects state before permitting reset. A reset can install a valid pending image; see the [recovery contract](receiver-recovery.md).
 
-- **Registry:** exact model, component role, hardware revision where available, normal and bootloader identities, protocol backend, firmware catalog key, connection instructions, and validation evidence.
-- **Discovery:** Linux USB/HID enumeration, then documented identity and version queries. Manual selection narrows candidates but cannot override a hardware mismatch. USB descriptor versions are not assumed to be firmware versions.
-- **Firmware catalog:** obtain releases from verified vendor sources, preserve source and digest, validate package structure and target compatibility, and cache complete downloads before flashing. A locally calculated hash detects later corruption; it does not authenticate an untrusted download. Firmware redistribution is outside the initial scope.
-- **Update engine:** adapters for distinct protocol families; evaluate fwupd for supported legacy hardware and native HID transports for modern devices. Firmware writes must not depend on the frontend staying open.
-- **Decky interface:** controller-friendly navigation, separate controller/receiver version rows, connection guidance, progress, and recovery instructions. Unsupported targets cannot offer an active update button.
+`SourceReviewedAuthorization` and `LegacySourceReviewedAuthorization` describe experimental transactions. `FlashQualification` describes a demonstrated hardware update. All three registries remain empty; UI choices and catalog results cannot populate them. See the [authorization requirements](protocol.md#authorization-and-hardware-qualification).
 
-Use the Decky template's React/TypeScript frontend and evaluate a Python core with a small, explicit transport interface. Confirm packaging and USB permissions before committing to a backend library. Avoid disabling SteamOS's read-only system partition or granting every process unrestricted HID access.
+## Hardware evidence and limits
 
-## Milestones
+Read-only identification passed on both generations of receiver. Ultimate 2 paired status and the bounded radio identity/read path passed through receiver 1.06. Private reads obtained the receiver 1.01 application and both receiver bootloaders; the bootloaders are byte-identical. Private binaries and disassembly are not distributed.
 
-1. **Identify and inspect.** Implement read-only enumeration and a support registry. Distinguish the first-generation Ultimate variant, the Ultimate 2 controller, and both receivers. Read firmware versions through documented queries. Show official release information and export sanitized diagnostics. Test the web updater's non-flashing path on the Deck.
-2. **Update the owned devices.** Establish protocol behavior from official code, licensed implementations, and captured transactions where necessary. Document connection transitions, model verification, erase/write acknowledgments, completion checks, and recovery. Validate one exact controller and receiver target at a time before enabling it in the plugin.
-3. **Package and expand.** Test installation and upgrade on SteamOS, then prepare Decky distribution. Add legacy fwupd coverage where both the installed plugin and firmware source support it. Add other device families with hardware evidence; keep untested models disabled.
+The Ultimate 2 receiver running 1.01 entered recovery as `2dc8:3208` with the expected descriptor, but `EACCES` prevented GET_PID and reset. **The recovery round trip has not passed.** Administrator authorization and a physical power cycle await user action. The original Bluetooth receiver's boot transition, live initialization tuple, and recovery remain untested. Simulated tests establish host behavior, not recovery from interrupted writes.
 
-## Verification before enabling firmware writes
+## Remaining work
 
-- Resolve controller versus receiver and exact model before an erase command. A shared bootloader PID or a matching product name is insufficient.
-- Finish downloading and validate the image, expected size, target fields, and available authenticity evidence before entering the destructive stage.
-- Use one update job per physical target and a device lock. Prevent suspend during the job and restore the previous state when it ends.
-- Handle unplug, timeout, re-enumeration, malformed replies, and lost frontend connections explicitly. Do not blindly retry erase/write commands or offer cancellation during a non-interruptible stage.
-- Preserve calibration or identity regions when required by that protocol. Provide only recovery and backup capabilities demonstrated for the particular device.
-- Require protocol completion evidence and, where supported, readback verification; reconnect and check the reported firmware version. Sending the last packet alone is not success.
+1. Complete recovery access setup and physically reconnect the affected Ultimate 2 receiver. Verify boot identity, reset, and return to the expected runtime version before claiming a completed round trip.
+2. Review each proposed experimental authorization against the exact source version, destination image, model/role, and recovery evidence. Keep source-reviewed records distinct from hardware qualifications and disclose unresolved limits.
+3. Have Trevor run an explicitly authorized update on one exact target at a time. Verify the reported destination version and normal operation afterward; record failures without retrying destructive commands blindly. Wireless transfer requires separate validation.
+4. Validate SteamOS installation and upgrades, then broaden family support with corresponding protocol and hardware evidence. Preserve calibration and identity regions according to each protocol; do not infer a universal recovery or rollback mechanism.
 
-Use unit tests for package parsing, target mismatches, and the update state machine; recorded transport fixtures for protocol behavior; and real hardware for each enabled model/role/revision. Simulated tests cannot establish that a device can recover from an interrupted write.
-
-## Decisions remaining
-
-The original Ultimate Bluetooth receiver is now identified automatically through its model tag. Before enabling updates, qualify the distinct receiver and controller protocols and verify a recovery procedure for each target. Trevor will run the firmware updates once those paths are ready; discovery and downloaded images alone do not meet that requirement.
+Use unit tests for package parsing, authorization gates, transport framing, and failure handling, plus real hardware evidence for qualified model/role/revision combinations. Destructive power-loss testing requires a recoverable test target and a deliberate procedure.
