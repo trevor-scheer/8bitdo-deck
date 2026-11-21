@@ -16,6 +16,7 @@ Two Ultimate 2 controllers connected wirelessly after being powered on. Their re
 | Direct USB reads of receiver 1.01 application and both receiver bootloaders | Read successfully for private analysis; the 1.01 and 1.06 bootloaders are byte-identical |
 | Direct USB class-05 `C3` on receiver 1.06 | CRC16 and additive checksum matched 128 existing staging bytes read at absolute address `0x13000`; receiver remained at 1.06 |
 | Production `_verify_block` on those existing receiver bytes | Checksum and complete readback verification passed; receiver identity unchanged afterward |
+| Direct USB full-block verification on receiver 1.06 | Both checksums and all 4096 existing bytes at staging address `0x14000` matched, including the final two-byte readback; identity unchanged |
 
 No radio updater commands were sent through receiver firmware 1.01: its forwarding implementation has not been reviewed. Successful paired-status reads do not establish firmware-update compatibility. No Bluetooth connections, pairing changes, or vendor Bluetooth commands were made; the Bluetooth observations below came from cached services and static analysis.
 
