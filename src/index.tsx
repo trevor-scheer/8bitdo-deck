@@ -2,8 +2,8 @@ import { definePlugin } from "@decky/api";
 import { ButtonItem, DropdownItem, PanelSection, PanelSectionRow, staticClasses } from "@decky/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Device, Job, Model, RecoveryAccess, Release, exportDiagnostics, getJob, getModels, getReleases,
-  getRecoveryAccess, installUpdate, openOfficialUpdater, prepareUpdate, scanDevices, setupRecoveryAccess,
+  Device, Job, Model, RecoveryAccess, Release, checkRecovery, exportDiagnostics, getJob, getModels, getReleases,
+  getRecoveryAccess, installUpdate, openOfficialUpdater, prepareUpdate, recoverUpdate, scanDevices, setupRecoveryAccess,
 } from "./api";
 
 const LAST_JOB = "8bitdo-deck:last-job";
@@ -200,7 +200,7 @@ function Content() {
   }, [modelId]);
 
   useEffect(() => {
-    if (!jobId) return;
+    if (!jobId || busy) return;
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -330,6 +330,21 @@ function Content() {
           })}>Confirm firmware installation</ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow><ButtonItem disabled={busy} layout="below" onClick={() => setConfirmInstall(false)}>Go back</ButtonItem></PanelSectionRow>
+      </>}
+      {["failed", "blocked"].includes(job.state) && job.can_check_recovery && !job.recovery_ready && <PanelSectionRow>
+        <ButtonItem disabled={busy || jobActive} layout="below" description="Checks this interrupted update without writing firmware." onClick={() => void act(async () => {
+          const result = await checkRecovery(job.id);
+          if (alive.current) setJob(result);
+        })}>Check interrupted update</ButtonItem>
+      </PanelSectionRow>}
+      {job.recovery_ready && <>
+        <p style={textStyle}>The receiver state has been checked. Recovery may finish an already committed update. Keep USB connected.</p>
+        <PanelSectionRow>
+          <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {
+            const result = await recoverUpdate(job.id, true);
+            if (alive.current) setJob(result);
+          })}>Confirm receiver recovery</ButtonItem>
+        </PanelSectionRow>
       </>}
       {!jobActive && <PanelSectionRow>
         <ButtonItem disabled={busy} layout="below" onClick={() => {

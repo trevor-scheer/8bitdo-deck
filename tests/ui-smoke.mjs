@@ -60,6 +60,7 @@ async function mount(t) {
     releaseModels: [], prepareCalls: [], installCalls: [], jobs: new Map(), nativeReady: false,
     evidenceLevel: undefined, recoveryChecks: 0, recoverySetupCalls: 0, recoveryError: null,
     recoveryAccess: { configured: false, pending: false, can_setup: true, message: "Recovery access needs setup." },
+    interrupted: false, checkCalls: [], recoverCalls: [], jobChecks: [], finishRecovery: null,
   };
   handlers = {
     scan_devices: async () => state.scanOverride ?? { devices: state.devices, warnings: [] },
@@ -76,10 +77,27 @@ async function mount(t) {
         message: state.nativeReady ? "Ready to install." : "Native flash unverified.",
         can_install: state.nativeReady, target_label: "Ultimate 2 receiver firmware 1.05",
         evidence_level: state.evidenceLevel,
+        can_check_recovery: state.interrupted,
       });
       return { job_id: id };
     },
-    get_job: async (id) => state.jobs.get(id),
+    get_job: async (id) => { state.jobChecks.push(id); return state.jobs.get(id); },
+    check_recovery: async (...args) => {
+      state.checkCalls.push(args);
+      const [id] = args;
+      const job = { ...state.jobs.get(id), recovery_ready: true, recovery_action: "finish_boot_copy" };
+      state.jobs.set(id, job);
+      return job;
+    },
+    recover_update: async (...args) => {
+      state.recoverCalls.push(args);
+      const [id, confirmed] = args;
+      assert.equal(confirmed, true, "Recovery requires explicit confirmation");
+      if (state.finishRecovery) await state.finishRecovery;
+      const job = { ...state.jobs.get(id), state: "queued", recovery_ready: false, can_check_recovery: false, message: "Recovery queued." };
+      state.jobs.set(id, job);
+      return job;
+    },
     install_update: async (id) => {
       state.installCalls.push(id);
       const job = { ...state.jobs.get(id), state: "complete", progress: 100, message: "Verified.", can_install: false };
@@ -164,6 +182,8 @@ test("manual browsing does not identify hardware or enable an unsupported write"
   assert.equal(button("Review installation"), undefined);
   assert.equal(button("Confirm firmware installation"), undefined);
   assert.deepEqual(state.installCalls, []);
+  assert.equal(button("Check interrupted update"), undefined);
+  assert.equal(button("Confirm receiver recovery"), undefined);
 });
 
 test("a qualified target still requires explicit installation confirmation", async (t) => {
@@ -220,4 +240,38 @@ test("experimental evidence is disclosed before review and still requires confir
   await click("Review installation");
   assert.ok(button("Confirm firmware installation"));
   assert.deepEqual(state.installCalls, []);
+});
+
+test("interrupted recovery requires checking and explicit confirmation, then resumes queued polling", async (t) => {
+  const { state, button, click, renderedText } = await mount(t);
+  state.interrupted = true;
+  await click("Prepare firmware");
+  assert.ok(button("Check interrupted update"));
+  assert.equal(button("Confirm receiver recovery"), undefined);
+  assert.deepEqual(state.recoverCalls, []);
+
+  await click("Check interrupted update");
+  assert.deepEqual(state.checkCalls, [["job-1"]]);
+  assert.deepEqual(state.recoverCalls, [], "Checking must never start recovery");
+  assert.equal(button("Check interrupted update"), undefined);
+  assert.ok(renderedText().includes("Recovery may finish an already committed update. Keep USB connected."));
+  assert.ok(button("Confirm receiver recovery"));
+
+  let finishRecovery;
+  state.finishRecovery = new Promise((resolve) => { finishRecovery = resolve; });
+  await click("Confirm receiver recovery");
+  assert.deepEqual(state.recoverCalls, [["job-1", true]]);
+  assert.equal(button("Confirm receiver recovery").props.disabled, true);
+  await settle(() => finishRecovery());
+  assert.ok(renderedText().includes("Recovery queued."));
+  assert.equal(button("Scan connected devices").props.disabled, true);
+
+  const previousChecks = state.jobChecks.length;
+  state.jobs.set("job-1", { ...state.jobs.get("job-1"), state: "complete", message: "Recovery verified." });
+  await settle(() => new Promise((resolve) => setTimeout(resolve, 1100)));
+  assert.ok(state.jobChecks.length > previousChecks, "Queued recovery must resume polling");
+  assert.ok(renderedText().includes("Recovery verified."));
+  assert.equal(button("Confirm receiver recovery"), undefined);
+  assert.deepEqual(state.installCalls, []);
+  assert.deepEqual(state.recoverCalls, [["job-1", true]]);
 });
