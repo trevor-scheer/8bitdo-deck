@@ -15,7 +15,7 @@ The plugin provides:
 - Official stable releases for Ultimate 2 controller/receiver, Ultimate Bluetooth controller/receiver, and the original Ultimate 2.4G controller/receiver.
 - Bounded HTTPS downloads, exact size and firmware-header checks, local SHA-256 receipts, and explicit provenance limits.
 - Background jobs, native protocol backends, targeted legacy fwupd installation, suspend inhibition, and post-update version checks. Native jobs require a developer-issued authorization.
-- Recovery USB access setup through the normal administrator prompt, with udev rules limited to two 8BitDo bootloader identities.
+- Automatic recognition of SteamOS recovery USB access, without terminal commands or administrator setup. Other Linux systems can use a scoped installer through the normal administrator prompt.
 - A launcher for the official WebHID updater in Chrome, plus sanitized diagnostic exports.
 
 The dock is not assumed to be a separate firmware target. Its receiver has its own firmware.
@@ -24,14 +24,14 @@ The dock is not assumed to be a separate firmware target. Its receiver has its o
 
 | Device or route | Implemented | Hardware validation |
 | --- | --- | --- |
-| Ultimate 2 Wireless receiver, USB `6013` | Discovery/catalog, guarded native transaction, experimental recovery helper | Read-only checks passed on 1.06 and 1.01; recovery entry reached `3208`, but access denial prevented GET_PID/reset and a completed round trip |
+| Ultimate 2 Wireless receiver, USB `6013` | Discovery/catalog, guarded native transaction, experimental recovery helper | Read-only checks passed on 1.06 and 1.01; recovery entry reached `3208`; nonprivileged access now passes, but boot GET_PID/reset and the complete round trip remain unverified |
 | Ultimate 2 Wireless controller | Paired status, bounded radio identity probe, catalog, native application transaction | Two controllers reported 1.10; radio identity and firmware reads passed through receiver 1.06; no native update or controller recovery tested |
 | Ultimate Bluetooth receiver, shared USB `3109` | Model-tag identification, catalog, separate boot transaction and service integration | Identified at 1.03 and validated official 1.04 download; boot transition and complete update remain untested |
 | Original Ultimate Bluetooth controller and 2.4G controller/receiver | Separate firmware catalog entries; legacy model-tag decoder; download/header checks | Firmware files checked; native updates not qualified |
 | Legacy fwupd `ebitdo` devices | Trusted upgrade selection and targeted installation for supported, bootloader-ready devices | Integration tested with simulated responses; no legacy device flashed here |
 | Other 8BitDo products | Unknown devices remain visible; official updater link available | No native support claim |
 
-Recovery access setup and a physical power cycle of the Ultimate 2 receiver await user action; its recovery round trip has not passed. See the [recovery findings](docs/receiver-recovery.md).
+SteamOS 3.9.5 already grants recovery HID access; opening the receiver as the desktop user succeeded without installing rules. The earlier `EACCES` does not establish a missing OS policy, and its cause remains unknown. Boot GET_PID/reset and the recovery round trip have not completed. See the [recovery findings](docs/receiver-recovery.md).
 
 **Prepare firmware does not flash a device.** An image that passes structural checks can still be blocked from installation. Manual model selection never authorizes a hardware write. The vendor's undocumented `md5` field does not match sampled complete files; the app records this without claiming that a locally calculated digest proves authenticity.
 

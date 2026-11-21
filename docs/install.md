@@ -35,15 +35,17 @@ The plugin runs as the desktop user and does not request Decky's root flag. It d
 
 ### Receiver recovery access
 
-Before enabling a receiver update, configure access to its recovery USB interface. Select **Set up receiver recovery** and approve the normal SteamOS administrator prompt. If Gaming Mode cannot show that prompt, switch to Desktop Mode and run the packaged installer:
+On normal SteamOS, no terminal command or administrator setup is needed. The plugin recognizes the existing trusted SteamOS policy and checks actual device access. On the tested SteamOS 3.9.5 system, the root-owned `70-steam-jupiter-input.rules` already grants HID access to the active local user. Opening and closing the receiver's recovery interface as the desktop user succeeded without installing rules. The plugin still runs without Decky's root flag.
+
+If another Linux system lacks suitable recovery access, select **Set up receiver recovery** and approve its normal administrator prompt. If Gaming Mode cannot show the prompt, run the packaged fallback installer in Desktop Mode:
 
 ```sh
 bash ~/homebrew/plugins/8bitdo-deck/scripts/install-udev-rules.sh
 ```
 
-The installer asks for administrator authorization through `pkexec`. It adds two udev rules for USB vendor `2dc8`, recovery products `3208` and `3002`, granting access to the active local user. It does not grant access to every USB device, run the plugin as root, or change firmware. The plugin checks the root-owned rules and installation receipt before permitting a reviewed native update. Actual recovery-mode checks remain device-specific.
+The fallback installer uses `pkexec` and adds rules only for USB vendor `2dc8`, recovery products `3208` and `3002`. It grants access to the active local user without changing firmware or running the plugin as root. The backend recognizes either the trusted SteamOS policy or the installed scoped rules and receipt; it also checks actual access when opening the device. A bounded wait accommodates delayed device access during re-enumeration. Permission checks do not replace device-specific recovery validation.
 
-To remove these rules, run the same installer with `--uninstall`, then reconnect the receivers. Removing the Decky plugin alone does not remove system permission rules.
+To remove the fallback rules, run the installer with `--uninstall`, then reconnect the receivers. Removing the Decky plugin alone does not remove those rules. This does not remove SteamOS's own policy.
 
 ## Prepare and install firmware
 
@@ -51,7 +53,7 @@ The plugin automatically selects the first identified component and loads its ma
 
 **Prepare firmware** does not write to a device. For vendor firmware it downloads and validates the image. For fwupd it prepares a trusted release plan; fwupd downloads and validates the firmware when installation begins.
 
-The plugin offers **Review installation** only when the backend authorizes the prepared update. Native jobs require a matching developer-issued authorization and recovery access setup. Review the target, version, and evidence level, then select **Confirm firmware installation**. A source-reviewed experimental update has not been hardware-qualified. Keep the USB connection and power stable until the plugin reports verification complete. Background jobs continue when the sidebar closes; reopening the plugin restores their status. Do not restart Decky or SteamOS during installation: a service restart can terminate child workers. After a worker interruption, the app requires checking the device rather than retrying automatically.
+The plugin offers **Review installation** only when the backend authorizes the prepared update. Native jobs require a matching developer-issued authorization and verified recovery access. Review the target, version, and evidence level, then select **Confirm firmware installation**. A source-reviewed experimental update has not been hardware-qualified. Keep the USB connection and power stable until the plugin reports verification complete. Background jobs continue when the sidebar closes; reopening the plugin restores their status. Do not restart Decky or SteamOS during installation: a service restart can terminate child workers. After a worker interruption, the app requires checking the device rather than retrying automatically.
 
 The fwupd route preserves the system service's authorization and configured reporting policies. A device whose identity changes after leaving the bootloader may need a manual rescan; the app does not declare success solely because the install command exited successfully.
 
@@ -63,7 +65,7 @@ For an eligible failed or blocked source-reviewed Ultimate 2 receiver install, *
 
 If inspection permits reset, the plugin offers **Confirm receiver recovery**. This explicit confirmation starts a background worker that repeats all checks, resets once if still required and permitted, and verifies the receiver on the same port. Reset may cause the vendor bootloader to install an already committed image. Returning to the original version leaves the update incomplete; a timeout does not trigger another reset. Keep USB and power connected.
 
-All authorization registries remain empty, so this build enables no recovery jobs. The hardware check reached the expected recovery USB identity and descriptor, but `EACCES` prevented GET_PID and reset. A completed recovery round trip has not been demonstrated. See the [recovery contract and evidence limits](receiver-recovery.md).
+All authorization registries remain empty, so this build enables no recovery jobs. The initial hardware check reached the expected recovery USB identity and descriptor, but `EACCES` prevented GET_PID and reset. A later nonprivileged open succeeded under the existing SteamOS policy, without installing rules. The earlier failure does not establish a missing OS policy; its exact cause remains unknown. Boot GET_PID/reset and a completed recovery round trip have not yet been demonstrated. See the [recovery contract and evidence limits](receiver-recovery.md).
 
 ## Diagnose or remove the plugin
 
