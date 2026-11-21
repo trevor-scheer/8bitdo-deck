@@ -143,9 +143,9 @@ def inspect_device(device: Device, lock_dir: Path) -> Device:
         try:
             with HidrawTransport(path, pid, lock_dir / (device.id + ".lock"), expected_usb_path=device.usb_path or None) as transport:
                 identity = query_identity(transport, usb_pid=pid)
-                if pid == 0x6013 and identity.target_verified:
+                if identity.product_id == 0x6013 and identity.target_verified:
                     try:
-                        paired = query_paired_identity(transport, receiver_pid=pid, timeout=0.5)
+                        paired = query_paired_identity(transport, receiver_pid=identity.product_id, timeout=0.5)
                         if 0 < paired.version_raw < 0xFFFF:
                             device.paired_firmware_version = paired.version
                     except (OSError, ValueError, TimeoutError, RuntimeError):
