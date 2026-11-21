@@ -46,6 +46,7 @@ class FlashDevice:
                  pid=0x6013, bad_readback_offset=0, bad_sum=False, block_size=4096, bad_echo=None):
         self.pid = pid
         self.staging_base = {0x6012: 0x32000, 0x6013: 0x13000}[pid]
+        self.metadata = b"\xff" * 52
         self.memory = bytearray(self.staging_base + ((size + 4095) // 4096) * 4096)
         self.sent = []
         self.reply = None
@@ -88,7 +89,11 @@ class FlashDevice:
             checked = self.memory[start:start + ((count >> 7) & 0xFF) * 128]
             data = struct.pack("<HI", crc16(checked) ^ int(self.bad_crc), sum(checked) ^ int(self.bad_sum))
         if command == 5 and not status:
-            data = bytes(self.memory[offset:offset + length])
+            metadata_offset = offset - (self.staging_base - 4096)
+            if 0 <= metadata_offset < len(self.metadata):
+                data = self.metadata[metadata_offset:metadata_offset + length]
+            else:
+                data = bytes(self.memory[offset:offset + length])
             if self.bad_readback and offset == self.staging_base + self.bad_readback_offset:
                 data = bytes([data[0] ^ 1]) + data[1:]
         response_offset = offset + 1 if self.wrong_offset and command == 3 else offset
@@ -399,6 +404,24 @@ class ProtocolTests(unittest.TestCase):
                         qualification=qualification(image),
                     )
                     self.assertEqual(result.bytes_verified, 4225)
+
+    def test_pending_or_corrupt_commit_record_prevents_staging_overwrite(self):
+        pending = bytearray(52)
+        struct.pack_into("<I", pending, 24, 0xAEB14D6C)
+        struct.pack_into("<I", pending, 48, crc16(pending[:48]))
+        malformed = pending[:]
+        malformed[48] ^= 1
+        for pid in (0x6012, 0x6013):
+            for metadata in (pending, malformed):
+                with self.subTest(pid=pid, valid=metadata == pending):
+                    image = parse_firmware(firmware(pid=pid))
+                    transport = FlashDevice(pid=pid)
+                    transport.metadata = bytes(metadata)
+                    with self.assertRaisesRegex(ProtocolError, "metadata|pending"):
+                        flash_application(transport, image, identity=DeviceIdentity(pid, 106),
+                                          qualification=qualification(image))
+                    for command in (0xC1, 3, 4, 0xC4, 7):
+                        self.assertNotIn(command, transport.commands)
 
     def test_changed_device_stops_before_erase(self):
         image = parse_firmware(firmware())
