@@ -233,7 +233,10 @@ class RecoveryServiceTests(unittest.TestCase):
                 patch('eightbitdo.service.subprocess.Popen') as start:
             self.service._spawn(self.job, 'recover')
         command = start.call_args.args[0]
-        self.assertEqual(command[0], '/usr/bin/systemd-inhibit')
+        self.assertEqual(command[0], '/usr/bin/systemd-run')
+        self.assertIn('--user', command)
+        self.assertIn('/usr/bin/systemd-inhibit', command)
+        self.assertTrue(any(value.startswith('--setenv=PYTHONPATH=') for value in command))
         self.assertEqual(command[-1], 'recover')
         self.assertIn('--what=sleep', command)
         with patch('eightbitdo.service.shutil.which', return_value=None), \

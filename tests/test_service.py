@@ -346,10 +346,29 @@ class ServiceTests(unittest.TestCase):
                 patch("eightbitdo.service.subprocess.Popen") as spawn:
             self.service._spawn(job, "install")
         command = spawn.call_args.args[0]
-        self.assertEqual(command[0], "/usr/bin/systemd-inhibit")
+        self.assertEqual(command[0], "/usr/bin/systemd-run")
+        self.assertIn("--user", command)
+        self.assertIn("--collect", command)
+        self.assertIn("--wait", command)
+        self.assertIn("--pipe", command)
+        self.assertIn("--no-ask-password", command)
+        self.assertIn("/usr/bin/systemd-inhibit", command)
+        source_root = str(Path(__file__).resolve().parent.parent)
+        self.assertIn("--setenv=PYTHONPATH=" + source_root, command)
+        self.assertIn("--working-directory=" + source_root, command)
+        unit = next(value for value in command if value.startswith("--unit="))
+        self.assertRegex(unit, "^--unit=8bitdo-deck-" + job["id"] + "-[0-9a-f]+$")
         self.assertIn("--what=sleep", command)
         self.assertIn("--mode=block", command)
         self.assertTrue(spawn.call_args.kwargs["start_new_session"])
+
+    def test_missing_user_manager_launcher_never_falls_back_to_direct_worker(self):
+        job = self.native_job()
+        with patch("eightbitdo.service.shutil.which", side_effect=lambda name: None if name == "systemd-run" else "/usr/bin/" + name), \
+                patch("eightbitdo.service.subprocess.Popen") as spawn:
+            with self.assertRaises(RuntimeError):
+                self.service._spawn(job, "install")
+        spawn.assert_not_called()
 
     def test_native_worker_without_inhibitor_never_starts(self):
         job = self.native_job()
