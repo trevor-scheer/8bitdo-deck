@@ -7,6 +7,7 @@ See docs/legacy-receiver-protocol.md for source addresses and remaining limits.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import struct
 import time
@@ -127,6 +128,12 @@ def _exchange(
     if not 0 < timeout <= 60:
         raise ProtocolError("Timeout must be between zero and 60 seconds")
     transport.send(build_boot_command(command, **fields))
+    return _receive_reply(transport, command, payload_size=payload_size, timeout=timeout)
+
+
+def _receive_reply(
+    transport: ReportTransport, command: int, *, payload_size: int = 0, timeout: float = 2.0,
+) -> bytes:
     deadline = time.monotonic() + timeout
     while (remaining := deadline - time.monotonic()) > 0:
         try:
@@ -156,24 +163,30 @@ def request_receiver_boot(transport: ReportTransport, *, identity: DeviceIdentit
     transport.send(BOOT_ENTRY_REPORT)
 
 
-def _reset_boot(transport: ReportTransport) -> None:
-    # The vendor reads the reset ACK before closing HID. Live hardware stayed
-    # in boot mode when HID closed immediately after sending; reopening the
-    # input endpoint allowed it to return to the application.
-    # A missing ACK remains an error; neither disconnect nor timeout proves boot.
-    _exchange(transport, 7)
+def _reset_boot(transport: ReportTransport) -> bool:
+    # Keep input polling active after sending: closing HID immediately can leave
+    # this receiver in boot mode. Its reset can also disconnect before ACK delivery.
+    transport.send(build_boot_command(7))
+    try:
+        _receive_reply(transport, 7)
+    except OSError as error:
+        if error.errno not in (errno.EIO, errno.ENODEV, errno.ENXIO):
+            raise
+        return False
+    return True
 
 
-def reset_receiver_boot(transport: ReportTransport, *, usb_pid: int) -> None:
+def reset_receiver_boot(transport: ReportTransport, *, usb_pid: int) -> bool:
     """Reset a verified receiver without initializing, erasing, or saving firmware.
 
-    Keep HID open until the reset acknowledgment is consumed, then the caller
-    must verify application re-enumeration. Missing or invalid replies propagate
-    without retrying reset; a disconnect does not establish successful boot.
+    Keep HID open until ACK or a reset disconnect. Return whether ACK was received;
+    either result requires the caller to verify same-port application identity and
+    version. Send errors, timeouts, malformed replies, and unrelated receive errors
+    propagate without retrying reset.
     """
     if query_boot_target(transport, usb_pid=usb_pid) != RECEIVER_PID:
         raise FirmwareMismatch("Bootloader belongs to another 8BitDo model")
-    _reset_boot(transport)
+    return _reset_boot(transport)
 
 
 def _validate_image(image: FirmwareImage) -> None:
