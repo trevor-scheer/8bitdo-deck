@@ -10,7 +10,7 @@ def clean_text(value: str, limit: int = 160) -> str:
     return "".join(c for c in value if c.isprintable())[:limit]
 
 
-def report_layout(descriptor: bytes) -> tuple[set[int], set[int], set[int]]:
+def report_layout(descriptor: bytes, *, report_bits: int = 504, unnumbered: bool = False) -> tuple[set[int], set[int], set[int]]:
     """Read HID global items and report sizes without interpreting device input."""
     pages: set[int] = set()
     inputs: set[int] = set()
@@ -42,6 +42,8 @@ def report_layout(descriptor: bytes) -> tuple[set[int], set[int], set[int]]:
             if key:
                 if key == "report" and not 1 <= value <= 255:
                     raise ValueError("Invalid HID report ID")
+                if key == "report" and unnumbered:
+                    raise ValueError("Expected unnumbered HID reports")
                 state[key] = value
             elif tag == 10:
                 stack.append(state.copy())
@@ -54,7 +56,7 @@ def report_layout(descriptor: bytes) -> tuple[set[int], set[int], set[int]]:
             bits[key] = bits.get(key, 0) + state["size"] * state["count"]
             report_pages.setdefault(key, set()).add(state["page"])
     for (tag, report), size in bits.items():
-        if size == 504:
+        if size == report_bits:
             pages.update(report_pages[(tag, report)])
             (inputs if tag == 8 else outputs).add(report)
     return pages, inputs, outputs

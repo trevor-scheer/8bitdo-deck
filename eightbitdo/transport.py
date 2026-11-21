@@ -45,10 +45,7 @@ class HidrawTransport:
                 raise ValueError("Invalid HID report descriptor size.")
             descriptor_buffer = bytearray(struct.pack("I", size) + bytes(4096))
             fcntl.ioctl(self.fd, 0x90044802, descriptor_buffer, True)  # HIDIOCGRDESC
-            from .discovery import report_layout
-            pages, inputs, outputs = report_layout(bytes(descriptor_buffer[4:4 + size]))
-            if not (pages & {0xFFA0, 0xFF7A, 0x008C} and 0x02 in inputs and 0x81 in outputs):
-                raise ValueError("The opened HID interface does not match the control protocol.")
+            self._check_descriptor(bytes(descriptor_buffer[4:4 + size]))
             return self
         except BaseException:
             self.__exit__(None, None, None)
@@ -64,8 +61,7 @@ class HidrawTransport:
     def send(self, report: bytes) -> None:
         if self.fd is None:
             raise RuntimeError("The HID connection is closed.")
-        if len(report) != 64 or report[0] != 0x81:
-            raise ValueError("Expected a 64-byte vendor output report.")
+        self._check_output(report)
         # The vendor discards queued input before a request; stale replies must
         # not authorize a later transaction. Bound draining on a noisy device.
         for _ in range(128):
@@ -98,3 +94,37 @@ class HidrawTransport:
             if not report:
                 raise OSError("The device disconnected.")
             return report
+
+    def _check_descriptor(self, descriptor: bytes) -> None:
+        from .discovery import report_layout
+        pages, inputs, outputs = report_layout(descriptor)
+        if not (pages & {0xFFA0, 0xFF7A, 0x008C} and 0x02 in inputs and 0x81 in outputs):
+            raise ValueError("The opened HID interface does not match the control protocol.")
+
+    def _check_output(self, report: bytes) -> None:
+        if len(report) != 64 or report[0] != 0x81:
+            raise ValueError("Expected a 64-byte vendor output report.")
+
+
+class BootHidrawTransport(HidrawTransport):
+    """Unnumbered boot reports, bound to the original device's physical USB port.
+
+    A shared boot USB PID is not a firmware identity. Callers must query and
+    verify the bootloader's product ID before any update transaction.
+    """
+
+    def __init__(self, path: Path, pid: int, lock_path: Path, *, expected_usb_path: str):
+        if pid not in (0x3208, 0x3002) or not expected_usb_path:
+            raise ValueError("A known boot USB personality and original USB port are required.")
+        super().__init__(path, pid, lock_path, expected_usb_path=expected_usb_path)
+
+    def _check_descriptor(self, descriptor: bytes) -> None:
+        from .discovery import report_layout
+        pages, inputs, outputs = report_layout(descriptor, report_bits=512, unnumbered=True)
+        if not (any(page >= 0xFF00 for page in pages) and inputs == {0} and outputs == {0}):
+            raise ValueError("The boot interface must have unnumbered 64-byte vendor reports.")
+
+    def _check_output(self, report: bytes) -> None:
+        # hidraw requires the synthetic zero report selector on writes only.
+        if len(report) != 65 or report[0] != 0:
+            raise ValueError("Expected a zero report selector and 64 boot payload bytes.")
