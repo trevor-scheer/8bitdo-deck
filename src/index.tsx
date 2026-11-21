@@ -322,6 +322,7 @@ function Content() {
       </PanelSectionRow>}
       {job.can_install && confirmInstall && <>
         <p style={textStyle}>Install {job.target_label || "the prepared firmware on the verified device"}? Keep USB connected and keep the Deck awake until verification finishes.</p>
+        {job.evidence?.trim() && <p style={{ ...textStyle, whiteSpace: "pre-wrap" }}>{job.evidence}</p>}
         <PanelSectionRow>
           <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {
             setConfirmInstall(false);

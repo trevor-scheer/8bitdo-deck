@@ -58,7 +58,7 @@ async function mount(t) {
   const state = {
     devices: [unknown, receiver], scanOverride: null,
     releaseModels: [], prepareCalls: [], installCalls: [], jobs: new Map(), nativeReady: false,
-    evidenceLevel: undefined, recoveryChecks: 0, recoverySetupCalls: 0, recoveryError: null,
+    evidenceLevel: undefined, evidence: undefined, recoveryChecks: 0, recoverySetupCalls: 0, recoveryError: null,
     recoveryAccess: { configured: false, pending: false, can_setup: true, message: "Recovery access needs setup." },
     interrupted: false, checkCalls: [], recoverCalls: [], jobChecks: [], finishRecovery: null,
     recoveryAction: "finish_boot_copy",
@@ -78,6 +78,7 @@ async function mount(t) {
         message: state.nativeReady ? "Ready to install." : "Native flash unverified.",
         can_install: state.nativeReady, target_label: "Ultimate 2 receiver firmware 1.05",
         evidence_level: state.evidenceLevel,
+        evidence: state.evidence,
         can_check_recovery: state.interrupted,
       });
       return { job_id: id };
@@ -230,17 +231,22 @@ test("recovery polling errors stop pending setup and remain visible", async (t) 
   assert.deepEqual(state.installCalls, []);
 });
 
-test("experimental evidence is disclosed before review and still requires confirmation", async (t) => {
+test("experimental review discloses detailed source evidence before installation confirmation", async (t) => {
   const { state, button, click, renderedText } = await mount(t);
   state.nativeReady = true;
   state.evidenceLevel = "source-reviewed-experimental";
+  state.evidence = "Vendor source reviewed for this exact receiver and target image. Installed bootloader contents have not been read. First flash and recovery reflash remain untested on hardware.";
   await click("Prepare firmware");
   assert.ok(renderedText().includes("Experimental update: the protocol has been reviewed, but a complete update has not yet been validated on hardware."));
   assert.ok(button("Review installation"));
   assert.equal(button("Confirm firmware installation"), undefined);
+  assert.ok(!renderedText().includes(state.evidence));
   await click("Review installation");
+  assert.ok(renderedText().includes(state.evidence), "Review must show the backend's exact evidence before confirmation");
   assert.ok(button("Confirm firmware installation"));
   assert.deepEqual(state.installCalls, []);
+  await click("Confirm firmware installation");
+  assert.deepEqual(state.installCalls, ["job-1"]);
 });
 
 test("interrupted recovery requires checking and explicit confirmation, then resumes queued polling", async (t) => {
