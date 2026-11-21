@@ -4,9 +4,10 @@ import unittest
 from dataclasses import replace
 
 from eightbitdo.protocol import (
-    DeviceIdentity, FlashQualification, FirmwareMismatch, ProtocolError,
+    DeviceIdentity, FlashAuthorization, FlashQualification, FirmwareMismatch, ProtocolError,
     ProtocolTimeout, UnsupportedProtocol, build_command, crc16, flash_application,
     parse_command_reply, parse_firmware, parse_identity_reply, query_identity, query_paired_identity,
+    SourceRegion, SourceReviewedAuthorization, verify_authorization_sources,
 )
 
 
@@ -116,7 +117,105 @@ def qualification(image):
     return FlashQualification(image.pid, None, image.revision, image.sha256, "Test fixture only", (106,))
 
 
+def source_review_fixture(pid=0x6013):
+    image = parse_firmware(firmware(pid=pid))
+    transport = FlashDevice(pid=pid)
+    boot = bytes(i % 251 for i in range(0x5000))
+    installed = bytearray(firmware(pid=pid)[28:])
+    struct.pack_into("<I", installed, 24, 84)
+    struct.pack_into("<I", installed, 84, sum(installed[:80]))
+    transport.memory[:0x5000] = boot
+    transport.memory[0x5000:0x5060] = installed
+    authorization = SourceReviewedAuthorization(
+        pid, None, image.revision, image.sha256, "Synthetic source-review fixture only", (106,),
+        (SourceRegion(0, len(boot), hashlib.sha256(boot).hexdigest()),
+         SourceRegion(0x5000, len(installed), hashlib.sha256(installed).hexdigest())),
+    )
+    return image, transport, authorization
+
+
 class ProtocolTests(unittest.TestCase):
+    def test_experimental_preparation_hashes_both_complete_source_regions(self):
+        for pid in (0x6012, 0x6013):
+            with self.subTest(pid=pid):
+                image, transport, authorization = source_review_fixture(pid)
+                verify_authorization_sources(transport, image, identity=DeviceIdentity(pid, 106),
+                                             qualification=authorization)
+                self.assertEqual(authorization.evidence_level, "source-reviewed-experimental")
+                self.assertEqual(qualification(image).evidence_level, "hardware-validated")
+                self.assertEqual(set(transport.commands), {5})
+                reads = [struct.unpack_from("<HHHHII", report, 2) for report in transport.sent]
+                self.assertEqual(sum(header[2] for header in reads), 0x5000 + 96)
+                self.assertEqual([header[5] for header in reads], list(range(0, 0x5060, 32)))
+
+    def test_experimental_flash_rechecks_sources_after_preparation(self):
+        for pid in (0x6012, 0x6013):
+            for changed_address in (0x4FFF, 0x505F):
+                with self.subTest(pid=pid, changed_address=changed_address):
+                    image, transport, authorization = source_review_fixture(pid)
+                    identity = DeviceIdentity(pid, 106)
+                    verify_authorization_sources(transport, image, identity=identity, qualification=authorization)
+                    transport.sent.clear()
+                    transport.memory[changed_address] ^= 1
+                    with self.assertRaisesRegex(FirmwareMismatch, "source-reviewed fingerprint"):
+                        flash_application(transport, image, identity=identity, qualification=authorization)
+                    for command in (0xC1, 3, 4, 0xC4, 7):
+                        self.assertNotIn(command, transport.commands)
+
+    def test_experimental_flash_accepts_matching_bound_sources(self):
+        image, transport, authorization = source_review_fixture()
+        result = flash_application(transport, image, identity=DeviceIdentity(0x6013, 106),
+                                   qualification=authorization)
+        self.assertEqual(result.bytes_verified, len(image.payload))
+        self.assertEqual(transport.commands[-2:], [0xC4, 7])
+
+    def test_missing_or_invalid_source_bindings_fail_without_io(self):
+        image, _, authorization = source_review_fixture()
+        boot, app = authorization.source_regions
+        invalid = [(), (boot,), (boot, boot), [boot, app], (boot, object()),
+                   (replace(boot, length=0x4FFF), app), (boot, replace(app, address=0x6000)),
+                   (boot, replace(app, length=0xC001)), (boot, replace(app, length=32)),
+                   (replace(boot, sha256="z" * 64), app), (boot, replace(app, sha256="")),
+                   (replace(boot, address=False), app), (boot, replace(app, length=96.0))]
+        for regions in invalid:
+            with self.subTest(regions=regions):
+                transport = QueueTransport([])
+                with self.assertRaises(UnsupportedProtocol):
+                    flash_application(transport, image, identity=DeviceIdentity(0x6013, 106),
+                                      qualification=replace(authorization, source_regions=regions))
+                self.assertEqual(transport.sent, [])
+
+    def test_unqualified_source_identity_or_base_record_sends_nothing(self):
+        image, _, authorization = source_review_fixture()
+        identities = [DeviceIdentity(0x6013, 106, target_verified=False), DeviceIdentity(0x6008, 106),
+                      DeviceIdentity(0x6013, 101), DeviceIdentity(0x6013, 106, beta=1),
+                      DeviceIdentity(0x6013, 106, hardware_revision=1)]
+        for identity in identities:
+            with self.subTest(identity=identity):
+                transport = QueueTransport([])
+                with self.assertRaises(ProtocolError):
+                    verify_authorization_sources(transport, image, identity=identity, qualification=authorization)
+                self.assertEqual(transport.sent, [])
+        transport = QueueTransport([])
+        base = FlashAuthorization(0x6013, None, image.revision, image.sha256, "Not evidence", (106,))
+        with self.assertRaises(UnsupportedProtocol):
+            flash_application(transport, image, identity=DeviceIdentity(0x6013, 106), qualification=base)
+        self.assertEqual(transport.sent, [])
+
+    def test_matching_hash_cannot_authorize_incomplete_or_wrong_source_application(self):
+        for extent, pid in ((96, 0x6013), (84, 0x6012), (31, 0x6013)):
+            with self.subTest(extent=extent, pid=pid):
+                image, transport, authorization = source_review_fixture()
+                struct.pack_into("<I", transport.memory, 0x5018, extent)
+                struct.pack_into("<H", transport.memory, 0x501C, pid)
+                boot, app = authorization.source_regions
+                app = replace(app, sha256=hashlib.sha256(transport.memory[0x5000:0x5060]).hexdigest())
+                authorization = replace(authorization, source_regions=(boot, app))
+                with self.assertRaisesRegex(FirmwareMismatch, "complete matching application"):
+                    flash_application(transport, image, identity=DeviceIdentity(0x6013, 106),
+                                      qualification=authorization)
+                self.assertNotIn(0xC1, transport.commands)
+
     def test_crc_known_vector(self):
         self.assertEqual(crc16(b"123456789"), 0x4B37)
         self.assertEqual(crc16(b""), 0xFFFF)

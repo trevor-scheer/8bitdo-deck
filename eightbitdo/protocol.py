@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import struct
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
 
@@ -105,12 +105,8 @@ class FirmwareImage:
 
 
 @dataclass(frozen=True)
-class FlashQualification:
-    """Developer-issued evidence binding, never constructed from UI arguments.
-
-The registry must require a real hardware qualification record before creating
-this object. A nonempty evidence string alone is not hardware verification.
-"""
+class FlashAuthorization:
+    """Common developer-issued binding; the base type alone cannot authorize a write."""
 
     product_id: int
     hardware_revision: int | None
@@ -118,6 +114,28 @@ this object. A nonempty evidence string alone is not hardware verification.
     image_sha256: str
     evidence: str
     source_versions: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class FlashQualification(FlashAuthorization):
+    """A hardware-validated update record, never constructed from UI arguments."""
+
+    evidence_level: str = field(default="hardware-validated", init=False)
+
+
+@dataclass(frozen=True)
+class SourceRegion:
+    address: int
+    length: int
+    sha256: str
+
+
+@dataclass(frozen=True)
+class SourceReviewedAuthorization(FlashAuthorization):
+    """Experimental source review, explicitly distinct from a successful hardware update."""
+
+    source_regions: tuple[SourceRegion, ...] = ()
+    evidence_level: str = field(default="source-reviewed-experimental", init=False)
 
 
 @dataclass(frozen=True)
@@ -374,22 +392,13 @@ def _check_commit_metadata(transport: ReportTransport, product_id: int) -> None:
         raise ProtocolError("A firmware image is already pending; do not overwrite its staging area")
 
 
-def flash_application(
-    transport: ReportTransport,
-    image: FirmwareImage,
-    *,
-    identity: DeviceIdentity,
-    qualification: FlashQualification,
-    progress: Callable[[str, int, int], None] | None = None,
-) -> FlashResult:
-    """Write a qualified Ultimate 2 target in application mode.
-
-No destructive command is retried. A failure propagates without resetting or
-committing the device. The caller must reconnect and verify the version after
-the returned result; this function never declares a completed update.
-    """
+def _validate_flash_authorization(
+    image: FirmwareImage, identity: DeviceIdentity, qualification: FlashAuthorization,
+) -> tuple[SourceRegion, ...]:
     if identity.product_id not in MODERN_PIDS or not identity.target_verified:
         raise UnsupportedProtocol("Native flashing supports only qualified Ultimate 2 application-mode targets")
+    if type(qualification) not in (FlashQualification, SourceReviewedAuthorization):
+        raise UnsupportedProtocol("A developer-issued hardware or source-reviewed authorization is required")
     if (
         image.product_id != identity.product_id
         or qualification.product_id != identity.product_id
@@ -414,10 +423,81 @@ the returned result; this function never declares a completed update.
     ) + image.payload
     if hashlib.sha256(encoded_image).hexdigest() != qualification.image_sha256:
         raise FirmwareMismatch("Firmware changed after qualification")
+    if isinstance(qualification, FlashQualification):
+        return ()
+    regions = qualification.source_regions
+    if type(regions) is not tuple or len(regions) != 2 or any(type(r) is not SourceRegion for r in regions):
+        raise UnsupportedProtocol("Source review requires immutable boot and installed application fingerprints")
+    for region in regions:
+        if (
+            type(region.address) is not int or type(region.length) is not int
+            or not isinstance(region.sha256, str) or len(region.sha256) != 64
+            or any(c not in "0123456789abcdef" for c in region.sha256)
+        ):
+            raise UnsupportedProtocol("Invalid source fingerprint")
+    by_address = {region.address: region for region in regions}
+    if (
+        set(by_address) != {0, 0x5000} or by_address[0].length != 0x5000
+        or not 36 <= by_address[0x5000].length <= MAX_APPLICATION_SIZES[identity.product_id]
+    ):
+        raise UnsupportedProtocol("Source fingerprints must cover the bootloader and bounded installed application")
+    return (by_address[0], by_address[0x5000])
+
+
+def verify_authorization_sources(
+    transport: ReportTransport,
+    image: FirmwareImage,
+    *,
+    identity: DeviceIdentity,
+    qualification: FlashAuthorization,
+) -> None:
+    """Validate the authorization, then read and hash experimental source regions.
+
+    Preparation and installation must both call this check. It never initializes,
+    writes, or resets a device, and never returns the source bytes to the caller.
+    """
+    for region in _validate_flash_authorization(image, identity, qualification):
+        digest = hashlib.sha256()
+        first = b""
+        for position in range(0, region.length, 32):
+            count = min(32, region.length - position)
+            data = _exchange(
+                transport, 5, length=count, total_length=count, offset=region.address + position,
+            ).payload
+            digest.update(data)
+            if position == 0:
+                first = data
+        if digest.hexdigest() != region.sha256:
+            raise FirmwareMismatch("Installed firmware or bootloader differs from the source-reviewed fingerprint")
+        if region.address == 0x5000:
+            extent = int.from_bytes(first[24:28], "little")
+            if (
+                first[8:12] != b"KNLT" or int.from_bytes(first[28:30], "little") != identity.product_id
+                or not 32 <= extent <= region.length - 4 or extent % 4
+            ):
+                raise FirmwareMismatch("Source fingerprint does not cover a complete matching application")
+
+
+def flash_application(
+    transport: ReportTransport,
+    image: FirmwareImage,
+    *,
+    identity: DeviceIdentity,
+    qualification: FlashAuthorization,
+    progress: Callable[[str, int, int], None] | None = None,
+) -> FlashResult:
+    """Write an authorized Ultimate 2 target in application mode.
+
+No destructive command is retried. A failure propagates without resetting or
+committing the device. The caller must reconnect and verify the version after
+the returned result; this function never declares a completed update.
+    """
+    _validate_flash_authorization(image, identity, qualification)
     current = query_identity(transport, usb_pid=identity.product_id)
     if current != identity:
         raise FirmwareMismatch("Device identity changed before updating")
     _check_commit_metadata(transport, identity.product_id)
+    verify_authorization_sources(transport, image, identity=identity, qualification=qualification)
     total = len(image.payload)
     notify = progress or (lambda stage, done, size: None)
     notify("preparing", 0, total)
