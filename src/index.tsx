@@ -338,12 +338,14 @@ function Content() {
         })}>Check interrupted update</ButtonItem>
       </PanelSectionRow>}
       {job.recovery_ready && <>
-        <p style={textStyle}>The receiver state has been checked. Recovery may finish an already committed update. Keep USB connected.</p>
+        <p style={textStyle}>{job.recovery_action === "reflash"
+          ? "Recovery will erase the receiver firmware and reinstall the exact cached image for this interrupted update. Keep USB connected and keep the Deck awake."
+          : "The receiver state has been checked. Recovery may finish an already committed update. Keep USB connected."}</p>
         <PanelSectionRow>
           <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {
             const result = await recoverUpdate(job.id, true);
             if (alive.current) setJob(result);
-          })}>Confirm receiver recovery</ButtonItem>
+          })}>{job.recovery_action === "reflash" ? "Confirm erase and reinstall" : "Confirm receiver recovery"}</ButtonItem>
         </PanelSectionRow>
       </>}
       {!jobActive && <PanelSectionRow>

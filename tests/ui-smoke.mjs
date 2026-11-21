@@ -61,6 +61,7 @@ async function mount(t) {
     evidenceLevel: undefined, recoveryChecks: 0, recoverySetupCalls: 0, recoveryError: null,
     recoveryAccess: { configured: false, pending: false, can_setup: true, message: "Recovery access needs setup." },
     interrupted: false, checkCalls: [], recoverCalls: [], jobChecks: [], finishRecovery: null,
+    recoveryAction: "finish_boot_copy",
   };
   handlers = {
     scan_devices: async () => state.scanOverride ?? { devices: state.devices, warnings: [] },
@@ -85,7 +86,7 @@ async function mount(t) {
     check_recovery: async (...args) => {
       state.checkCalls.push(args);
       const [id] = args;
-      const job = { ...state.jobs.get(id), recovery_ready: true, recovery_action: "finish_boot_copy" };
+      const job = { ...state.jobs.get(id), recovery_ready: true, recovery_action: state.recoveryAction };
       state.jobs.set(id, job);
       return job;
     },
@@ -274,4 +275,26 @@ test("interrupted recovery requires checking and explicit confirmation, then res
   assert.equal(button("Confirm receiver recovery"), undefined);
   assert.deepEqual(state.installCalls, []);
   assert.deepEqual(state.recoverCalls, [["job-1", true]]);
+});
+
+test("legacy recovery discloses erasing and reinstalling the same cached image before confirmation", async (t) => {
+  const { state, button, click, renderedText } = await mount(t);
+  state.interrupted = true;
+  state.recoveryAction = "reflash";
+  await click("Prepare firmware");
+  assert.equal(button("Confirm erase and reinstall"), undefined);
+
+  await click("Check interrupted update");
+  assert.deepEqual(state.checkCalls, [["job-1"]]);
+  assert.deepEqual(state.recoverCalls, [], "A recovery check must not erase or write firmware");
+  assert.deepEqual(state.installCalls, []);
+  assert.ok(renderedText().includes("Recovery will erase the receiver firmware and reinstall the exact cached image for this interrupted update."));
+  assert.ok(!renderedText().includes("Recovery may finish an already committed update."));
+  assert.equal(button("Confirm receiver recovery"), undefined);
+  assert.ok(button("Confirm erase and reinstall"));
+
+  await click("Confirm erase and reinstall");
+  assert.deepEqual(state.recoverCalls, [["job-1", true]]);
+  assert.deepEqual(state.installCalls, []);
+  assert.equal(button("Confirm erase and reinstall"), undefined);
 });
