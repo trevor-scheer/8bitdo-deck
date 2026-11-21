@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from eightbitdo.discovery import Device, clean_text, discover, inspect_device, report_layout
-from eightbitdo.protocol import DeviceIdentity, ProtocolTimeout
+from eightbitdo.protocol import DeviceIdentity, ProtocolTimeout, parse_identity_reply
 from eightbitdo.registry import QUERY_PIDS, get_model, model_for_identity
 
 
@@ -98,20 +98,20 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(device.role, "unknown")
         self.assertFalse(device.can_update)
 
-    def test_original_bluetooth_receiver_is_identified_from_official_usb_map(self):
-        self.fixture.usb(pid="3109", product="Ultimate Wireless Controller")
-        device, = self.scan()
-        self.assertEqual(device.model_id, "ultimate-bluetooth-receiver")
-        self.assertEqual(device.role, "receiver")
-        self.assertFalse(device.can_update)
+    def test_shared_usb_ids_do_not_identify_a_model_without_a_reply(self):
+        for index, pid in enumerate(("3109", "6007")):
+            self.fixture.usb(name=f"1-{index}", pid=pid, product="Ultimate Wireless Controller")
+        for device in self.scan():
+            self.assertIsNone(device.model_id)
+            self.assertEqual(device.role, "unknown")
+            self.assertFalse(device.can_update)
 
-    def test_legacy_version_reply_preserves_authoritative_usb_model(self):
+    def test_legacy_discriminator_identifies_bluetooth_receiver(self):
         node = self.fixture.usb(pid="3109", product="Ultimate Wireless Controller")
         self.fixture.interface(node)
         device, = self.scan()
-        # Its trailing bytes resemble an unrelated PID; only the version is
-        # usable. Desktop updater metadata identifies this USB personality.
-        identity = DeviceIdentity(0x3109, 103, target_verified=False)
+        # Sanitized live prefix; trailing unique data is deliberately omitted.
+        identity = parse_identity_reply(bytes.fromhex("02 22 67 00 00 80 23 00"), usb_pid=0x3109)
         with patch("eightbitdo.discovery.os.access", return_value=True), \
                 patch("eightbitdo.transport.HidrawTransport"), \
                 patch("eightbitdo.protocol.query_identity", return_value=identity):
@@ -120,7 +120,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(result.firmware_version, "1.03")
         self.assertEqual(result.status, "identified")
         self.assertEqual(result.role, "receiver")
-        self.assertIsNone(result.firmware_pid)
+        self.assertEqual(result.firmware_pid, 0x6008)
         self.assertFalse(result.can_update)
 
     def test_missing_product_name_has_generic_fallback(self):

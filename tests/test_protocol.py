@@ -113,12 +113,38 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(transport.sent[1], bytes.fromhex("81 05 00 21 01").ljust(64, b"\0"))
         self.assertIsNone(identity.hardware_revision)
 
-    def test_legacy_identity_never_guesses_target_from_opaque_fields(self):
+    def test_legacy_identity_uses_model_tag_and_single_byte_beta(self):
         report = bytes.fromhex("02 22 67 00 00 80 23 00 01 31")
         result = parse_identity_reply(report, usb_pid=0x3109)
-        self.assertEqual(result.pid, 0x3109)
-        self.assertEqual(result.version, "1.03")
-        self.assertFalse(result.target_verified)
+        self.assertEqual(result, DeviceIdentity(0x6008, 103, beta=0))
+        # Byte 5 is a flag, and bytes 8 onward are not a firmware PID.
+        changed = report[:4] + bytes.fromhex("03 ff") + report[6:8] + b"\xff" * 56
+        self.assertEqual(parse_identity_reply(changed, usb_pid=0x3109), DeviceIdentity(0x6008, 103, beta=3))
+
+    def test_legacy_query_distinguishes_known_models_without_modern_commands(self):
+        cases = [(0x3109, 0x0023, 0x6008), (0x3109, 0x3013, 0x3013),
+                 (0x3109, 0x9023, 0x3013), (0x6007, 0x0022, 0x6007),
+                 (0x6007, 0x0023, 0x6008)]
+        for usb_pid, tag, target in cases:
+            with self.subTest(usb_pid=usb_pid, tag=tag):
+                report = b"\x02\x22" + struct.pack("<HHH", 103, 0x8000, tag)
+                transport = QueueTransport([report])
+                self.assertEqual(query_identity(transport, usb_pid=usb_pid), DeviceIdentity(target, 103))
+                self.assertEqual(transport.sent, [bytes.fromhex("81 05 00 21 01").ljust(64, b"\0")])
+
+    def test_legacy_unknown_tags_do_not_inherit_vendor_default(self):
+        for usb_pid, tag in [(0x3109, 0), (0x3109, 0x6008), (0x3109, 0x0022),
+                             (0x6007, 0), (0x6007, 0x0123), (0x6007, 0x3013)]:
+            with self.subTest(usb_pid=usb_pid, tag=tag):
+                report = b"\x02\x22" + struct.pack("<HHH", 103, 0x8000, tag)
+                result = parse_identity_reply(report, usb_pid=usb_pid)
+                self.assertEqual(result, DeviceIdentity(usb_pid, 103, target_verified=False))
+
+    def test_legacy_truncated_tag_is_rejected(self):
+        for usb_pid in (0x3109, 0x6007):
+            for length in (6, 7):
+                with self.subTest(usb_pid=usb_pid, length=length), self.assertRaises(ProtocolError):
+                    parse_identity_reply(bytes.fromhex("02 22 67 00 00 80 23 00")[:length], usb_pid=usb_pid)
 
     def test_identity_rejects_mismatch_and_short_reply(self):
         with self.assertRaises(FirmwareMismatch):
