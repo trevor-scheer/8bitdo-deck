@@ -2,7 +2,7 @@
 
 A Decky plugin and Linux command-line tool for 8BitDo firmware on Steam Deck.
 
-**Early development build.** Device discovery, version queries, official firmware browsing, downloads, and package validation are implemented. Legacy installation delegates to fwupd for supported devices already in bootloader mode. Native Ultimate-series flashing is implemented at the protocol layer but remains disabled pending hardware qualification. No controller firmware has been flashed during this project's validation.
+**Early development build.** Device discovery, version queries, official firmware browsing, downloads, and package validation are implemented. Legacy installation delegates to fwupd for supported devices already in bootloader mode. Native Ultimate 2 flashing is implemented at the protocol layer but remains disabled pending hardware qualification. No controller firmware has been flashed during this project's validation.
 
 ## Use it
 
@@ -24,7 +24,7 @@ The dock is not assumed to be a separate firmware target. Its receiver has its o
 | Device or route | Implemented | Hardware validation |
 | --- | --- | --- |
 | Ultimate 2 Wireless receiver, USB `6013` | Identity, version, releases, download/header checks | Read-only checks passed on Steam Deck; receivers reported 1.06 and 1.01 |
-| Ultimate 2 Wireless controller | Direct USB and paired status query code, releases, download/header checks | Direct controller connection and native updates still need testing |
+| Ultimate 2 Wireless controller | Paired wireless status, bounded radio identity probe, releases, download/header checks | Two controllers reported 1.10 wirelessly; radio identity and firmware reads passed through receiver 1.06; native updates still need testing |
 | Ultimate Bluetooth receiver, shared USB `3109` | Automatic model-tag identification, version, matching firmware catalog | Read-only checks passed on Steam Deck; identified receiver at 1.03 and validated official 1.04 download |
 | Original Ultimate Bluetooth controller and 2.4G controller/receiver | Separate firmware catalog entries; legacy model-tag decoder; download/header checks | Firmware files checked; native updates not qualified |
 | Legacy fwupd `ebitdo` devices | Trusted upgrade selection and targeted installation for supported, bootloader-ready devices | Integration tested with simulated responses; no legacy device flashed here |
@@ -38,6 +38,7 @@ The backend requires Python 3.11 or later and has no third-party Python dependen
 
 ```sh
 python3 -m eightbitdo scan
+python3 -m eightbitdo probe-wireless
 python3 -m eightbitdo models
 python3 -m eightbitdo releases ultimate2-receiver
 python3 -m eightbitdo prepare ultimate2-receiver RELEASE_ID
@@ -57,6 +58,6 @@ pnpm run test:ui
 python3 scripts/package.py
 ```
 
-See the [implementation plan](docs/plan.md), [protocol and qualification requirements](docs/protocol.md), [catalog trust boundaries](docs/catalog.md), and [research](docs/research.md).
+See the [wireless update findings](docs/wireless-updates.md), [implementation plan](docs/plan.md), [protocol and qualification requirements](docs/protocol.md), [catalog trust boundaries](docs/catalog.md), and [research](docs/research.md).
 
 This is an independent project and is not affiliated with 8BitDo. Broad compatibility is the long-term goal; each additional device family requires its own evidence.

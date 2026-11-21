@@ -35,6 +35,8 @@ The sanitized live prefix `02 22 67 00 00 80 23 00` identifies the Bluetooth rec
 
 `query_paired_identity` sends `81 04 21 01 00 00 06` with zero padding to a `6013` receiver. A matching class-04 reply provides the paired controller's version, beta, battery percentage, and edition. It provides **no firmware product ID**, so this information is for display and does not qualify the wireless controller for installation. A timeout is reported as no response, without claiming the controller is disconnected.
 
+The optional [wireless identity probe](wireless-updates.md) verifies the radio updater route on receiver 1.06 / controller 1.10 without starting an update. The general paired-status query above remains display-only.
+
 ## Application update protocol
 
 A request has report ID `81`, command class `05`, a 16-byte little-endian header (`command`, `parameters`, `length`, `CRC`, `total length`, `offset`), and at most 46 payload bytes. The first four fields are 16-bit integers and the last two are 32-bit integers. Data CRC is CRC-16/MODBUS, with initial value `FFFF` and reflected polynomial `A001`.
@@ -46,7 +48,7 @@ The transaction follows these steps:
 1. Require a qualification record bound to product ID, reported hardware revision (or an explicit unreported value), allowed stable source firmware versions, image revision, and exact image SHA-256. Recompute the image hash from its header and payload. Beta source firmware is not accepted.
 2. Restrict the image to the Ultimate 2 Telink layout: physical header address `5000`, bounded image length, and `KNLT` payload marker. Requery identity and verify the application-mode product ID.
 3. For each block of at most 4096 bytes, erase with command `04` and write in at most 46-byte chunks with command `03`. Application-mode addresses start at logical zero, as in the vendor sequence. This must not be used as a bootloader write routine.
-4. Compare the device's block CRC through command `C3`, then compare a complete byte-for-byte readback through command `05`. Correlate write and read acknowledgments with their addresses. These stricter checks must be confirmed against real target replies during qualification.
+4. Compare the device's block CRC through command `C3`, then compare a complete byte-for-byte readback through command `05` at the absolute staging address (`0x32000 + offset` for controllers, `0x13000 + offset` for receivers). Correlate write and read acknowledgments with their addresses. These stricter checks must be confirmed against real target replies during qualification.
 5. Only after every block verifies, save the image length/version with command `C4` and send reset command `07` once.
 6. Return a result marked as requiring reconnect verification. The caller must reconnect to the same physical target and check the reported version before showing success.
 

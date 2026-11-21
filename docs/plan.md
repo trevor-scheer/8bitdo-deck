@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: Decky-first direction and initial two-pair scope approved on 2026-11-21. The first plugin, CLI, catalog, job engine, legacy fwupd integration, and experimental native protocol are implemented. Read-only discovery passed on the connected Deck receivers. Native firmware writes, direct-controller testing, and exact first-generation model identification remain outstanding. An experimental flash requires an identified target, a validated image, and a reviewable recovery procedure.
+Status: Decky-first direction and initial two-pair scope approved on 2026-11-21. The first plugin, CLI, catalog, job engine, legacy fwupd integration, and experimental native protocol are implemented. Read-only discovery passed on the connected Deck receivers. First-generation Bluetooth receiver identification and Ultimate 2 wireless status/identity reads are validated. Native firmware writes, direct-controller testing, and wireless recovery qualification remain outstanding. An experimental flash requires an identified target, a validated image, and a reviewable recovery procedure.
 
 ## Product scope
 
