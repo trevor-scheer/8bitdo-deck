@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import re
+import ssl
+import sys
 import tempfile
 import time
 import urllib.error
@@ -21,6 +23,7 @@ CATALOG_URL = "https://support.8bitdo.com/restapi/link/v1/client/firmware/select
 ALLOWED_HOSTS = frozenset({"support.8bitdo.com", "download.8bitdo.com"})
 MAX_METADATA_BYTES = 2 * 1024 * 1024
 MAX_FIRMWARE_BYTES = 16 * 1024 * 1024
+_SYSTEM_CA_FILES = ("/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/cert.pem")
 
 
 class CatalogError(ValueError):
@@ -93,6 +96,27 @@ class Fetcher(Protocol):
     def request(self, url: str, *, data: bytes | None = None, max_bytes: int) -> bytes: ...
 
 
+def _tls_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    if (
+        sys.platform != "linux"
+        or context.cert_store_stats()["x509_ca"]
+        or "SSL_CERT_FILE" in os.environ
+        or "SSL_CERT_DIR" in os.environ
+    ):
+        return context
+    # Bundled Python can point at nonexistent CA paths. Preserve explicit trust overrides,
+    # including lazy certificate directories, and supplement only an empty default store.
+    for cafile in _SYSTEM_CA_FILES:
+        try:
+            context.load_verify_locations(cafile=cafile)
+        except (OSError, ssl.SSLError):
+            continue
+        if context.cert_store_stats()["x509_ca"]:
+            break
+    return context
+
+
 class HTTPSFetcher:
     """Use certificate validation, request deadlines, and response-size limits."""
 
@@ -100,7 +124,9 @@ class HTTPSFetcher:
         if not 0 < timeout <= 60:
             raise ValueError("Timeout must be between zero and 60 seconds")
         self.timeout = timeout
-        self._opener = urllib.request.build_opener(_VendorRedirects())
+        self._opener = urllib.request.build_opener(
+            _VendorRedirects(), urllib.request.HTTPSHandler(context=_tls_context()),
+        )
 
     def request(self, url: str, *, data: bytes | None = None, max_bytes: int) -> bytes:
         validate_url(url)
