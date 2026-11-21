@@ -9,6 +9,23 @@ import {
 const LAST_JOB = "8bitdo-deck:last-job";
 const textStyle = { fontSize: 13, lineHeight: 1.5, overflowWrap: "anywhere" as const, margin: "8px 0" };
 
+interface Selection {
+  deviceId: string;
+  modelId: string;
+  identity: string;
+  browsing: boolean;
+}
+
+const emptySelection: Selection = { deviceId: "", modelId: "", identity: "", browsing: false };
+
+function deviceIdentity(device: Device): string {
+  return JSON.stringify([device.id, device.vid, device.pid, device.role, device.model_id]);
+}
+
+function selectionForDevice(device: Device): Selection {
+  return { deviceId: device.id, modelId: device.model_id ?? "", identity: deviceIdentity(device), browsing: false };
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -26,6 +43,9 @@ function saveJob(id: string) {
 
 function Content() {
   const alive = useRef(true);
+  const selectionRef = useRef<Selection>(emptySelection);
+  const selectionRevision = useRef(0);
+  const scanRevision = useRef(0);
   const [devices, setDevices] = useState<Device[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [models, setModels] = useState<Model[]>([]);
@@ -47,27 +67,54 @@ function Content() {
   const release = releases.find((item) => item.id === releaseId);
   const jobActive = !!job && ["queued", "downloading", "validating", "installing", "verifying"].includes(job.state);
 
+  const applySelection = useCallback((selection: Selection) => {
+    if (selection.modelId !== selectionRef.current.modelId) {
+      setReleases([]);
+      setReleaseId("");
+    }
+    selectionRef.current = selection;
+    setDeviceId(selection.deviceId);
+    setModelId(selection.modelId);
+    setConfirmInstall(false);
+  }, []);
+
   const scan = useCallback(async () => {
+    const requestRevision = ++scanRevision.current;
+    const previousSelectionRevision = selectionRevision.current;
     setScanning(true);
     setError("");
     try {
       const [result, availableModels] = await Promise.all([scanDevices(), getModels()]);
-      if (!alive.current) return;
+      if (!alive.current || requestRevision !== scanRevision.current) return;
       setDevices(result.devices);
       setWarnings(result.warnings);
       setModels(availableModels);
-      setDeviceId((current) => result.devices.some((item) => item.id === current) ? current : "");
+      const authoritative = (item: Device) => ["identified", "supported"].includes(item.status)
+        && availableModels.some((candidate) => candidate.id === item.model_id);
+      const current = selectionRef.current;
+      const selectionChanged = previousSelectionRevision !== selectionRevision.current;
+      if (current.deviceId) {
+        const connected = result.devices.find((item) => item.id === current.deviceId);
+        if (connected && authoritative(connected) && (!selectionChanged || deviceIdentity(connected) === current.identity)) {
+          applySelection(selectionForDevice(connected));
+        } else if (!connected || !selectionChanged || deviceIdentity(connected) !== current.identity) {
+          applySelection(emptySelection);
+        }
+      } else if (!current.browsing && !selectionChanged) {
+        const detected = result.devices.find(authoritative);
+        applySelection(detected ? selectionForDevice(detected) : emptySelection);
+      }
     } catch (reason) {
-      if (alive.current) setError(`Could not scan devices: ${errorMessage(reason)}`);
+      if (alive.current && requestRevision === scanRevision.current) setError(`Could not scan devices: ${errorMessage(reason)}`);
     } finally {
-      if (alive.current) setScanning(false);
+      if (alive.current && requestRevision === scanRevision.current) setScanning(false);
     }
-  }, []);
+  }, [applySelection]);
 
   useEffect(() => {
     alive.current = true;
     void scan();
-    return () => { alive.current = false; };
+    return () => { alive.current = false; scanRevision.current++; };
   }, [scan]);
 
   useEffect(() => {
@@ -127,11 +174,9 @@ function Content() {
   };
 
   const selectDevice = (selected: Device) => {
-    setDeviceId(selected.id);
-    if (modelId !== selected.model_id) { setReleases([]); setReleaseId(""); }
-    setModelId(selected.model_id ?? "");
+    selectionRevision.current++;
+    applySelection(selectionForDevice(selected));
     setError("");
-    setConfirmInstall(false);
   };
 
   return <>
@@ -164,9 +209,10 @@ function Content() {
           selectedOption={modelId}
           disabled={busy || jobActive || !models.length}
           onChange={(option) => {
-            if (modelId !== option.data) { setReleases([]); setReleaseId(""); }
-            setModelId(option.data);
-            if (device?.model_id !== option.data) setDeviceId("");
+            selectionRevision.current++;
+            applySelection(device && device.model_id === option.data
+              ? selectionForDevice(device)
+              : { deviceId: "", modelId: option.data, identity: "", browsing: true });
             setError("");
           }}
         />
