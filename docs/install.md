@@ -21,7 +21,7 @@ Alternatively, download the **8bitdo-deck** artifact from a successful [Checks w
 
 ## Install through Decky
 
-Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader#installation) first if it is not already available.
+Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader#installation) first if it is not already available. Decky 3.3.1 is the tested loader version on SteamOS 3.9.5; older loaders can fail to initialize with newer Steam clients.
 
 1. Copy `8bitdo-deck.zip` to the Deck's Downloads folder.
 2. In Gaming Mode, open Decky from the Quick Access menu, then open Decky's settings.
@@ -43,7 +43,7 @@ The plugin offers **Review installation** only when the backend has qualified th
 
 The fwupd route preserves the system service's authorization and configured reporting policies. A device whose identity changes after leaving the bootloader may need a manual rescan; the app does not declare success solely because the install command exited successfully.
 
-For Ultimate-series devices, use **Open official updater**. This launches the Google Chrome Flatpak installed through Discover. Chrome's USB access and any vendor-specific connection instructions may need setup in Desktop Mode; the plugin does not automatically change those permissions. A validated firmware download with a blocked installation state is not a completed device update.
+**Open official updater** launches the vendor website in the Google Chrome Flatpak installed through Discover. Website support varies by model: the Ultimate Bluetooth receiver (`6008`) appears in its firmware catalog but has no update route in the inspected web implementation. This button is not a validated fallback for every detected device. Chrome's USB access and any vendor-specific connection instructions may need setup in Desktop Mode; the plugin does not automatically change those permissions. A validated firmware download with a blocked installation state is not a completed device update.
 
 ## Diagnose or remove the plugin
 

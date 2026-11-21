@@ -39,4 +39,4 @@ Use unit tests for package parsing, target mismatches, and the update state mach
 
 ## Decisions remaining
 
-Identify the original Ultimate variant from documented device queries or its model label before selecting its firmware. Separately arrange the first experimental hardware flash after its exact image, target, and recovery procedure are reviewable.
+The original Ultimate Bluetooth receiver is now identified automatically through its model tag. Before enabling updates, qualify the distinct receiver and controller protocols and verify a recovery procedure for each target. Trevor will run the firmware updates once those paths are ready; discovery and downloaded images alone do not meet that requirement.
