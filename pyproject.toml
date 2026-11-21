@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eightbitdo-deck"
-version = "0.1.1"
+version = "0.1.2"
 description = "8BitDo firmware discovery and update tools for Steam Deck"
 requires-python = ">=3.11"
 dependencies = []
