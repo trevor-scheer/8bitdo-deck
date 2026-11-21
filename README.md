@@ -53,6 +53,7 @@ python3 -m unittest discover -s tests -v
 pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run build
+pnpm run test:ui
 python3 scripts/package.py
 ```
 

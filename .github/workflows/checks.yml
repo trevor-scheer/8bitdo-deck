@@ -33,6 +33,8 @@ jobs:
         run: pnpm run typecheck
       - name: Build frontend
         run: pnpm run build
+      - name: Test frontend behavior
+        run: pnpm run test:ui
       - name: Package and smoke-test backend
         run: python scripts/package.py
       - name: Upload installable plugin

@@ -10,6 +10,7 @@ Use Python 3.11 or later, Node.js 22, and the pnpm version recorded in `package.
 pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run build
+pnpm run test:ui
 python3 -m unittest discover -s tests -v
 python3 scripts/package.py
 ```
@@ -34,7 +35,7 @@ The plugin runs as the desktop user and does not request Decky's root flag. It d
 
 ## Prepare and install firmware
 
-Select a detected component or browse a model manually. Controller and receiver firmware are separate; choosing a model manually does not prove that it matches attached hardware.
+The plugin automatically selects the first identified component and loads its matching firmware releases. If multiple components are connected, you can select another one from the device list. Controller and receiver firmware are separate. Manual model browsing remains available, but choosing a model manually does not prove that it matches attached hardware.
 
 **Prepare firmware** does not write to a device. For vendor firmware it downloads and validates the image. For fwupd it prepares a trusted release plan; fwupd downloads and validates the firmware when installation begins.
 
