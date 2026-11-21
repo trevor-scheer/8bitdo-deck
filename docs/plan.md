@@ -1,6 +1,6 @@
-# Implementation proposal
+# Implementation plan
 
-Status: proposed; awaiting approval under the supplied global `AGENTS.md` workflow. Creating this research project does not enable or authorize an experimental flash on connected hardware.
+Status: Decky-first direction and initial two-pair scope approved on 2026-11-21. Implementation and hardware validation remain outstanding. An experimental flash requires an identified target, a validated image, and a reviewable recovery procedure.
 
 ## Product scope
 
@@ -39,4 +39,4 @@ Use unit tests for package parsing, target mismatches, and the update state mach
 
 ## Decisions remaining
 
-Approve or revise the Decky-first direction and the initial two-pair scope. Identify the original Ultimate variant from documented device queries or its model label before selecting its firmware. Separately arrange the first experimental hardware flash after its exact image, target, and recovery procedure are reviewable.
+Identify the original Ultimate variant from documented device queries or its model label before selecting its firmware. Separately arrange the first experimental hardware flash after its exact image, target, and recovery procedure are reviewable.
