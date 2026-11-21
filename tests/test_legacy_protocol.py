@@ -47,7 +47,10 @@ class QueueTransport:
     def receive(self, timeout):
         if not self.reports:
             raise TimeoutError()
-        return self.reports.pop(0)
+        report = self.reports.pop(0)
+        if isinstance(report, Exception):
+            raise report
+        return report
 
 
 class ReceiverDevice:
@@ -65,6 +68,7 @@ class ReceiverDevice:
         self.initialization = initialization
         self.timeout_command = timeout_command
         self.saved = False
+        self.received_commands = []
 
     @property
     def commands(self):
@@ -116,6 +120,7 @@ class ReceiverDevice:
         self.pending = reply(command, response_data)
 
     def receive(self, timeout):
+        self.received_commands.append(self.commands[-1])
         if self.commands[-1] == self.timeout_command:
             raise TimeoutError()
         return self.pending
@@ -164,13 +169,29 @@ class LegacyProtocolTests(unittest.TestCase):
         self.assertEqual(len(transport.sent), 1)
 
     def test_reset_queries_target_without_initialize_or_commit(self):
-        transport = QueueTransport([reply(8, b"\x08\x60")])
+        transport = QueueTransport([reply(8, b"\x08\x60"), reply(7)])
         reset_receiver_boot(transport, usb_pid=0x3208)
         self.assertEqual(transport.sent, [build_boot_command(8, length=2, total_length=2), build_boot_command(7)])
+        self.assertEqual(transport.reports, [], "Reset must drain its ACK before the caller closes HID")
         wrong = QueueTransport([reply(8, b"\x13\x30")])
         with self.assertRaises(FirmwareMismatch):
             reset_receiver_boot(wrong, usb_pid=0x3208)
         self.assertEqual(len(wrong.sent), 1)
+
+    def test_reset_reply_failures_never_retry_or_claim_success(self):
+        for response, error in (
+            (TimeoutError("no reply"), ProtocolTimeout),
+            (reply(8), ProtocolError),
+            (reply(7, status=1), ProtocolError),
+            (OSError("The device disconnected."), OSError),
+        ):
+            with self.subTest(response=response):
+                transport = QueueTransport([reply(8, b"\x08\x60"), response])
+                with self.assertRaises(error):
+                    reset_receiver_boot(transport, usb_pid=0x3208)
+                self.assertEqual(transport.sent, [
+                    build_boot_command(8, length=2, total_length=2), build_boot_command(7),
+                ])
 
     def test_plan_preserves_prefix_and_uses_relative_offsets(self):
         image = firmware()
@@ -210,8 +231,33 @@ class LegacyProtocolTests(unittest.TestCase):
         requests = [packet for packet in device.sent if struct.unpack_from("<H", packet, 2)[0] == 0xC3]
         self.assertEqual([struct.unpack_from("<III", packet, 18) for packet in requests],
                          [(8192, 4096, 0), (12288, 4096, 0), (0, 4096, 0), (4096, 4096, 0)])
+        self.assertEqual(device.received_commands[-1], 7, "Final reset must drain its ACK")
         self.assertEqual(result.bytes_verified, 16384)
         self.assertTrue(result.needs_reconnect_verification)
+
+    def test_flash_reset_reply_failures_never_retry_or_return_verified_result(self):
+        image = firmware()
+        for response, error in (
+            (TimeoutError("no reply"), ProtocolTimeout),
+            (reply(8), ProtocolError),
+            (reply(7, status=1), ProtocolError),
+            (OSError("The device disconnected."), OSError),
+        ):
+            with self.subTest(response=response):
+                class ResetFailureDevice(ReceiverDevice):
+                    def receive(self, timeout):
+                        if self.commands[-1] == 7:
+                            if isinstance(response, Exception):
+                                raise response
+                            return response
+                        return super().receive(timeout)
+
+                device = ResetFailureDevice(image)
+                with self.assertRaises(error):
+                    self.flash(device, image)
+                self.assertEqual(device.commands.count(7), 1)
+                self.assertEqual(device.commands[-1], 7)
+                self.assertEqual(device.commands.count(0xC2), 1)
 
     def experimental_authorization(self, image):
         prefix = image.payload[:INITIALIZATION.image_offset]
