@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from eightbitdo.discovery import Device, clean_text, discover, inspect_device, report_layout
-from eightbitdo.protocol import DeviceIdentity, ProtocolTimeout, parse_identity_reply
+from eightbitdo.protocol import DeviceIdentity, PairedControllerInfo, ProtocolTimeout, parse_identity_reply
 from eightbitdo.registry import QUERY_PIDS, get_model, model_for_identity
 
 
@@ -175,6 +175,30 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(result.firmware_version, "1.06")
         self.assertEqual(result.role, "receiver")
         self.assertFalse(result.can_update)
+
+    def test_linked_receiver_queries_paired_status_by_verified_identity(self):
+        device = Device("test", "Device", "2dc8", "310b", hid_paths=[Path("/dev/hidraw7")])
+        with patch("eightbitdo.discovery.os.access", return_value=True), \
+                patch("eightbitdo.transport.HidrawTransport"), \
+                patch("eightbitdo.protocol.query_identity", return_value=DeviceIdentity(0x6013, 106)), \
+                patch("eightbitdo.protocol.query_paired_identity", return_value=PairedControllerInfo(110, 0, 100, 1)) as paired:
+            result = inspect_device(device, self.root / "locks")
+        paired.assert_called_once()
+        self.assertEqual(paired.call_args.kwargs["receiver_pid"], 0x6013)
+        self.assertEqual(result.paired_firmware_version, "1.10")
+        self.assertEqual(result.model_id, "ultimate2-receiver")
+        self.assertFalse(result.can_update)
+
+    def test_shared_usb_alias_is_not_enough_to_query_paired_controller(self):
+        for identity in (DeviceIdentity(0x6012, 110), DeviceIdentity(0x6013, 106, target_verified=False)):
+            device = Device("test", "Device", "2dc8", "310b", hid_paths=[Path("/dev/hidraw7")])
+            with self.subTest(identity=identity), patch("eightbitdo.discovery.os.access", return_value=True), \
+                    patch("eightbitdo.transport.HidrawTransport"), \
+                    patch("eightbitdo.protocol.query_identity", return_value=identity), \
+                    patch("eightbitdo.protocol.query_paired_identity") as paired:
+                result = inspect_device(device, self.root / "locks")
+            paired.assert_not_called()
+            self.assertIsNone(result.paired_firmware_version)
 
     def test_query_timeout_is_reported_without_device_loss(self):
         device = Device("test", "Device", "2dc8", "6013", hid_paths=[Path("/dev/hidraw7")])
