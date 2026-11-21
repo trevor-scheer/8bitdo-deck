@@ -16,7 +16,7 @@ from .discovery import Device, clean_text, discover, inspect_device
 from .fwupd import Fwupd, FwupdError
 from .jobs import ACTIVE_STATES, JobStore, default_state_dir, public_job
 from .legacy_protocol import (
-    LegacySourceReviewedAuthorization, flash_boot_receiver, request_receiver_boot,
+    LegacySourceReviewedAuthorization, flash_boot_receiver, inspect_receiver_boot, request_receiver_boot,
     validate_receiver_authorization,
 )
 from .protocol import (
@@ -364,20 +364,21 @@ class Service:
         states = {"queued"} if queued else {"failed", "blocked"}
         if (
             job.get("state") not in states or job.get("backend") != "hid"
-            or job.get("model_id") != "ultimate2-receiver"
+            or job.get("model_id") not in {"ultimate2-receiver", "ultimate-bluetooth-receiver"}
             or job.get("worker_action") not in {"install", "recover"}
             or job.get("evidence_level") != "source-reviewed-experimental"
             or type(job.get("original_version_raw")) is not int
             or not 0 < job["original_version_raw"] <= 0xFFFF
         ):
-            raise ValueError("This job has no reviewed Ultimate 2 receiver recovery path.")
+            raise ValueError("This job has no reviewed receiver recovery path.")
         port = job.get("original_usb_path")
         if not isinstance(port, str) or not Path(port).is_absolute() or os.path.normpath(port) != port:
             raise ValueError("The original physical USB port was not recorded.")
         expected_id = "usb-" + hashlib.sha256(port.encode()).hexdigest()[:16]
         if job.get("device_id") != expected_id:
             raise ValueError("The recovery job does not match its original USB port.")
-        original = DeviceIdentity(0x6013, job["original_version_raw"],
+        product_id = get_model(job["model_id"]).firmware_pid
+        original = DeviceIdentity(product_id, job["original_version_raw"],
                                   hardware_revision=job.get("original_hardware_revision"))
         if job.get("original_version") != original.version:
             raise ValueError("The original firmware version record is inconsistent.")
@@ -388,16 +389,19 @@ class Service:
         data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != job.get("sha256"):
             raise ValueError("The firmware image changed after preparation.")
-        image = parse_firmware(data, expected_pid=0x6013)
+        image = parse_firmware(data, expected_pid=product_id)
         if image.version != job.get("version"):
             raise ValueError("The firmware version changed after preparation.")
         authorization = qualification_for(image, original)
+        expected_type = LegacySourceReviewedAuthorization if product_id == 0x6008 else SourceReviewedAuthorization
         if (
-            type(authorization) is not SourceReviewedAuthorization
+            type(authorization) is not expected_type
             or authorization.evidence_level != job.get("evidence_level")
             or authorization.evidence != job.get("evidence")
         ):
             raise ValueError("The compiled source-reviewed recovery authorization changed or is unavailable.")
+        if expected_type is LegacySourceReviewedAuthorization:
+            validate_receiver_authorization(image, original, authorization)
         return image, authorization
 
     def _public_recovery_job(self, job: dict) -> dict:
@@ -412,24 +416,30 @@ class Service:
 
     def _recovery_device(self, job: dict) -> Device:
         device = next((d for d in discover() if d.id == job["device_id"]), None)
+        runtime_pids = {"3109"} if job["model_id"] == "ultimate-bluetooth-receiver" else {"6013", "310b"}
         if (
             device is None or device.usb_path != job["original_usb_path"]
             or device.vid != "2dc8" or device.backend != "hid"
-            or device.pid not in {"3208", "6013", "310b"}
+            or device.pid not in runtime_pids | {"3208"}
         ):
             raise ValueError("The original receiver is not connected on its recorded USB port.")
         return device
 
     def _read_recovery_identity(self, device: Device, job: dict) -> DeviceIdentity:
-        if device.pid not in {"6013", "310b"} or not device.hid_paths:
+        runtime_pids = {"3109"} if job["model_id"] == "ultimate-bluetooth-receiver" else {"6013", "310b"}
+        if device.pid not in runtime_pids or not device.hid_paths:
             raise ValueError("The receiver has not returned to application mode.")
         with HidrawTransport(
             device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"),
             expected_usb_path=job["original_usb_path"],
         ) as transport:
             identity = query_identity(transport, usb_pid=int(device.pid, 16))
-        if identity.product_id != 0x6013 or not identity.target_verified or identity.beta:
-            raise ValueError("The returning device is not the expected stable Ultimate 2 receiver.")
+        if (
+            identity.product_id != get_model(job["model_id"]).firmware_pid
+            or not identity.target_verified or identity.beta
+            or identity.hardware_revision != job.get("original_hardware_revision")
+        ):
+            raise ValueError("The returning device is not the expected stable receiver.")
         return identity
 
     def _record_recovery_version(self, job: dict, identity: DeviceIdentity) -> None:
@@ -454,15 +464,21 @@ class Service:
                 raise ValueError("Configure receiver recovery access before checking recovery.")
             with self.store.lock("update-" + job["device_id"]):
                 device = self._recovery_device(job)
-                if device.pid in {"6013", "310b"}:
+                if device.pid != "3208":
                     self._record_recovery_version(job, self._read_recovery_identity(device, job))
                 else:
                     with wait_for_boot(device, self.state_dir / "locks") as boot:
                         if boot.usb_pid != 0x3208:
                             raise ValueError("Unexpected receiver recovery USB personality.")
-                        status = inspect_recovery(boot.transport, image, authorization=authorization)
-                    job.update(state="blocked", recovery_ready=status.can_reset, recovery_action=status.action,
-                               message=status.reason + ". No reset was sent.")
+                        if isinstance(authorization, LegacySourceReviewedAuthorization):
+                            inspect_receiver_boot(boot.transport, usb_pid=boot.usb_pid,
+                                                  expected_initialization=authorization.initialization)
+                            job.update(state="blocked", recovery_ready=True, recovery_action="reflash",
+                                       message="Receiver boot identity and initialization match this attempted update. Recovery requires erasing and reinstalling this job's exact cached firmware image. No firmware was written or reset sent.")
+                        else:
+                            status = inspect_recovery(boot.transport, image, authorization=authorization)
+                            job.update(state="blocked", recovery_ready=status.can_reset, recovery_action=status.action,
+                                       message=status.reason + ". No reset was sent.")
             self.store.save(job)
             return self._public_recovery_job(job)
 
@@ -471,10 +487,11 @@ class Service:
             raise ValueError("Review the recovery check and explicitly confirm recovery first.")
         with self.store.lock(job_id):
             job = self.store.read(job_id)
-            self._recovery_context(job)
+            _, authorization = self._recovery_context(job)
             if not self.recovery_access.status()["configured"]:
                 raise ValueError("Configure receiver recovery access before recovering firmware.")
-            if job.get("recovery_ready") is not True or job.get("recovery_action") not in {"finish-pending", "return-installed"}:
+            actions = {"reflash"} if isinstance(authorization, LegacySourceReviewedAuthorization) else {"finish-pending", "return-installed"}
+            if job.get("recovery_ready") is not True or job.get("recovery_action") not in actions:
                 raise ValueError("Run a successful recovery check before confirming recovery.")
             job.update(state="queued", recovery_ready=False, recovery_confirmed=True, can_install=False,
                        progress=0, message="Starting confirmed recovery. Keep the receiver connected.")
@@ -489,9 +506,12 @@ class Service:
             raise ValueError("Configure receiver recovery access before recovering firmware.")
         with self.store.lock("update-" + job["device_id"]):
             device = self._recovery_device(job)
-            if device.pid in {"6013", "310b"}:
+            if device.pid != "3208":
                 self._record_recovery_version(job, self._read_recovery_identity(device, job))
                 self.store.save(job)
+                return
+            if isinstance(authorization, LegacySourceReviewedAuthorization):
+                self._run_legacy_recovery(job, device, image, authorization)
                 return
             job.update(state="verifying", recovery_ready=False, can_install=False,
                        message="Rechecking receiver identity, bootloader, metadata, and firmware before recovery.")
@@ -520,6 +540,42 @@ class Service:
                        message="Recovery reset was sent, but the expected receiver version was not confirmed. Check recovery again; no reset was retried.")
             self._save_progress(job)
 
+    def _run_legacy_recovery(self, job, device, image, authorization) -> None:
+        if job.get("recovery_action") != "reflash":
+            raise ValueError("This job has no confirmed receiver reflash request.")
+        original = DeviceIdentity(0x6008, job["original_version_raw"],
+                                  hardware_revision=job.get("original_hardware_revision"))
+        job.update(state="verifying", recovery_ready=False, can_install=False,
+                   message="Rechecking the original receiver boot interface before reinstalling the cached firmware.")
+        self.store.save(job)
+
+        def progress(stage: str, done: int, total: int) -> None:
+            percent = min(90, int(done * 90 / max(1, total)))
+            if percent > job["progress"] or job.get("stage") != stage:
+                job.update(state="installing", progress=max(job["progress"], percent),
+                           stage=stage, message=f"Receiver recovery: {stage}. Keep USB connected.")
+                self._save_progress(job)
+
+        with wait_for_boot(device, self.state_dir / "locks") as boot:
+            if boot.usb_pid != 0x3208:
+                raise ValueError("Unexpected receiver recovery USB personality.")
+            flash_boot_receiver(boot.transport, image, identity=original, boot_usb_pid=boot.usb_pid,
+                                qualification=authorization, progress=progress)
+        job.update(state="verifying", progress=95, recovery_confirmed=False,
+                   message="Cached firmware reinstalled. Verifying the same receiver's target version.")
+        self._save_progress(job)
+        try:
+            _, identity = wait_for_application(
+                device, self.state_dir / "locks", expected_product_id=0x6008,
+                expected_version_raw=image.version_raw & 0xFFFF,
+            )
+        except (OSError, ValueError, RuntimeError):
+            job.update(state="blocked", recovery_ready=False, can_install=False,
+                       message="Recovery transfer finished, but the target firmware version was not confirmed. Check recovery again; no update was retried.")
+        else:
+            self._record_recovery_version(job, identity)
+        self._save_progress(job)
+
     def _save_progress(self, job: dict) -> None:
         try:
             self.store.save(job)
@@ -529,7 +585,7 @@ class Service:
     def export_diagnostics(self) -> dict:
         devices, warnings = self._devices(probe=False)
         payload = {
-            "schema_version": 1, "app_version": "0.1.6",
+            "schema_version": 1, "app_version": "0.1.7",
             "devices": [{k: v for k, v in d.public().items() if k in {
                 "vid", "pid", "role", "firmware_version", "status", "can_update", "backend",
             }} for d in devices],
