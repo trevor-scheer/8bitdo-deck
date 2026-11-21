@@ -1,12 +1,14 @@
 import hashlib
 import io
 import json
+import os
+import ssl
 import tempfile
 import unittest
 import urllib.request
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, call, patch
 
 from eightbitdo.catalog import (
     CATALOG_URL,
@@ -187,6 +189,90 @@ class NetworkPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(CatalogError, "size limit"):
             fetcher.request("https://support.8bitdo.com/a.dat", max_bytes=32)
         response.read.assert_not_called()
+
+
+class TrustStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        certificates = ssl.create_default_context().get_ca_certs(binary_form=True)
+        if not certificates:
+            self.skipTest("A system CA is needed to exercise real OpenSSL trust loading")
+        self.bundle = self.root / "system-ca.pem"
+        self.bundle.write_text(ssl.DER_cert_to_PEM_cert(certificates[0]))
+        self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        self.original_flags = self.context.verify_flags
+
+    def make_fetcher(self, *, platform="linux", environment=None, bundles=None):
+        with patch.dict(os.environ, environment or {}, clear=True), \
+             patch("sys.platform", platform), \
+             patch("ssl.create_default_context", return_value=self.context), \
+             patch("ssl._create_default_https_context", return_value=self.context), \
+             patch("eightbitdo.catalog._SYSTEM_CA_FILES", bundles or (str(self.bundle),), create=True):
+            fetcher = HTTPSFetcher()
+        handlers = [handler for handler in fetcher._opener.handlers
+                    if isinstance(handler, urllib.request.HTTPSHandler)]
+        self.assertEqual(len(handlers), 1)
+        self.assertIs(handlers[0]._context, self.context)
+        self.assertEqual(self.context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(self.context.check_hostname)
+        self.assertEqual(self.context.verify_flags, self.original_flags)
+        return fetcher
+
+    def test_empty_linux_default_store_loads_real_system_ca(self):
+        self.assertEqual(self.context.cert_store_stats()["x509_ca"], 0)
+        self.make_fetcher()
+        self.assertEqual(self.context.cert_store_stats()["x509_ca"], 1)
+
+    def test_populated_default_store_is_not_extended(self):
+        self.context.load_verify_locations(cafile=str(self.bundle))
+        with patch.object(self.context, "load_verify_locations", wraps=self.context.load_verify_locations) as loader:
+            self.make_fetcher()
+            loader.assert_not_called()
+
+    def test_explicit_trust_overrides_prevent_fallback_even_when_empty(self):
+        # capath loads lazily; an empty count cannot establish that it is invalid.
+        for key, value in [("SSL_CERT_FILE", str(self.bundle)),
+                           ("SSL_CERT_DIR", str(self.root)),
+                           ("SSL_CERT_FILE", str(self.root / "missing.pem")),
+                           ("SSL_CERT_DIR", "")]:
+            with self.subTest(key=key, value=value), \
+                 patch.object(self.context, "load_verify_locations") as loader:
+                self.make_fetcher(environment={key: value})
+                loader.assert_not_called()
+                self.assertEqual(self.context.cert_store_stats()["x509_ca"], 0)
+
+    def test_unusable_bundle_is_skipped_before_valid_system_bundle(self):
+        invalid = self.root / "invalid.pem"
+        invalid.write_text("not a certificate")
+        missing = self.root / "missing.pem"
+        bundles = tuple(map(str, (missing, invalid, self.bundle)))
+        with patch.object(self.context, "load_verify_locations", wraps=self.context.load_verify_locations) as loader:
+            self.make_fetcher(bundles=bundles)
+            self.assertEqual(loader.call_args_list, [call(cafile=path) for path in bundles])
+        self.assertEqual(self.context.cert_store_stats()["x509_ca"], 1)
+
+    def test_absent_system_bundle_keeps_verification_required(self):
+        self.make_fetcher(bundles=(str(self.root / "missing.pem"),))
+        self.assertEqual(self.context.cert_store_stats()["x509_ca"], 0)
+
+    def test_other_platforms_preserve_their_default_context(self):
+        for platform in ("darwin", "win32"):
+            with self.subTest(platform=platform), patch.object(self.context, "load_verify_locations") as loader:
+                self.make_fetcher(platform=platform)
+                loader.assert_not_called()
+
+    def test_certificate_failure_does_not_retry_or_change_trust(self):
+        fetcher = self.make_fetcher()
+        fetcher._opener = Mock()
+        fetcher._opener.open.side_effect = urllib.error.URLError(
+            ssl.SSLCertVerificationError("certificate verification failed"))
+        with patch.object(self.context, "load_verify_locations") as loader:
+            with self.assertRaisesRegex(CatalogError, "certificate verification failed"):
+                fetcher.request(CATALOG_URL, max_bytes=128)
+            loader.assert_not_called()
+        fetcher._opener.open.assert_called_once()
 
 
 if __name__ == "__main__":
