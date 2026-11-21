@@ -41,12 +41,16 @@ class QueueTransport:
 class FlashDevice:
     """An application-mode fake; successful tests are not hardware qualification."""
 
-    def __init__(self, size=96, fail_command=None, bad_readback=False, wrong_offset=False, bad_crc=False):
-        self.memory = bytearray(size)
+    def __init__(self, size=96, fail_command=None, bad_readback=False, wrong_offset=False, bad_crc=False,
+                 pid=0x6013, bad_readback_offset=0):
+        self.pid = pid
+        self.staging_base = {0x6012: 0x32000, 0x6013: 0x13000}[pid]
+        self.memory = bytearray(self.staging_base + size)
         self.sent = []
         self.reply = None
         self.fail_command = fail_command
         self.bad_readback = bad_readback
+        self.bad_readback_offset = bad_readback_offset
         self.wrong_offset = wrong_offset
         self.bad_crc = bad_crc
 
@@ -60,19 +64,22 @@ class FlashDevice:
         status = 1 if command == self.fail_command else 0
         data = b""
         if command == 8:
-            data = struct.pack("<H", 0x6013)
+            data = struct.pack("<H", self.pid)
         if command == 4:
-            self.memory[offset:offset + total] = b"\xff" * total
+            start = self.staging_base + offset
+            self.memory[start:start + total] = b"\xff" * total
         if command == 3:
             assert crc16(payload) == checksum
-            self.memory[offset:offset + length] = payload
+            start = self.staging_base + offset
+            self.memory[start:start + length] = payload
         if command == 0xC3:
             start, count, block = struct.unpack("<III", payload)
             assert block == 4096
+            start += self.staging_base
             data = struct.pack("<H", crc16(self.memory[start:start + count]) ^ int(self.bad_crc))
         if command == 5:
             data = bytes(self.memory[offset:offset + length])
-            if self.bad_readback:
+            if self.bad_readback and offset == self.staging_base + self.bad_readback_offset:
                 data = bytes([data[0] ^ 1]) + data[1:]
         response_offset = offset + 1 if self.wrong_offset and command == 3 else offset
         self.reply = (
@@ -220,20 +227,30 @@ class ProtocolTests(unittest.TestCase):
                 parse_command_reply(report)
 
     def test_flash_transaction_verifies_before_commit(self):
-        image = parse_firmware(firmware(size=4150))
-        transport = FlashDevice(size=4150)
-        progress = []
-        result = flash_application(
-            transport, image, identity=DeviceIdentity(0x6013, 106), qualification=qualification(image),
-            progress=lambda *values: progress.append(values),
-        )
-        self.assertEqual(transport.memory, image.payload)
-        self.assertEqual(transport.commands.count(4), 2)
-        self.assertEqual(transport.commands.count(0xC3), 2)
-        self.assertEqual(transport.commands[-2:], [0xC4, 7])
-        self.assertTrue(result.needs_reconnect_verification)
-        self.assertEqual(result.bytes_verified, 4150)
-        self.assertEqual(progress[-1], ("restarting", 4150, 4150))
+        for pid, staging_base in [(0x6012, 0x32000), (0x6013, 0x13000)]:
+            with self.subTest(pid=pid):
+                image = parse_firmware(firmware(pid=pid, size=4150))
+                transport = FlashDevice(pid=pid, size=4150)
+                progress = []
+                result = flash_application(
+                    transport, image, identity=DeviceIdentity(pid, 106), qualification=qualification(image),
+                    progress=lambda *values: progress.append(values),
+                )
+                self.assertEqual(transport.memory[staging_base:], image.payload)
+                self.assertEqual(transport.memory[:staging_base], bytes(staging_base))
+                writes = [struct.unpack_from("<I", report, 14)[0]
+                          for report in transport.sent if report[2:4] == b"\x03\0"]
+                reads = [struct.unpack_from("<I", report, 14)[0]
+                         for report in transport.sent if report[2:4] == b"\x05\0"]
+                logical_offsets = list(range(0, 4096, 46)) + list(range(4096, 4150, 46))
+                self.assertEqual(writes, logical_offsets)
+                self.assertEqual(reads, [staging_base + offset for offset in logical_offsets])
+                self.assertEqual(transport.commands.count(4), 2)
+                self.assertEqual(transport.commands.count(0xC3), 2)
+                self.assertEqual(transport.commands[-2:], [0xC4, 7])
+                self.assertTrue(result.needs_reconnect_verification)
+                self.assertEqual(result.bytes_verified, 4150)
+                self.assertEqual(progress[-1], ("restarting", 4150, 4150))
 
     def test_flash_requires_exact_qualification_before_any_io(self):
         image = parse_firmware(firmware())
@@ -258,12 +275,16 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(transport.commands, [8, 0x2100, 4, 3])
 
     def test_readback_failure_never_commits(self):
-        image = parse_firmware(firmware())
-        transport = FlashDevice(bad_readback=True)
-        with self.assertRaises(ProtocolError):
-            flash_application(transport, image, identity=DeviceIdentity(0x6013, 106), qualification=qualification(image))
-        self.assertNotIn(0xC4, transport.commands)
-        self.assertNotIn(7, transport.commands)
+        for pid in (0x6012, 0x6013):
+            with self.subTest(pid=pid):
+                image = parse_firmware(firmware(pid=pid, size=4150))
+                transport = FlashDevice(pid=pid, size=4150, bad_readback=True, bad_readback_offset=4096)
+                with self.assertRaisesRegex(ProtocolError, "readback verification"):
+                    flash_application(transport, image, identity=DeviceIdentity(pid, 106),
+                                      qualification=qualification(image))
+                self.assertEqual(transport.commands.count(0xC3), 2)
+                self.assertNotIn(0xC4, transport.commands)
+                self.assertNotIn(7, transport.commands)
 
     def test_crc_failure_never_commits(self):
         image = parse_firmware(firmware())
