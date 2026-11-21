@@ -5,7 +5,7 @@ Neither downloaded metadata nor a UI request may populate this collection.
 """
 
 from .protocol import DeviceIdentity, FirmwareImage, FlashAuthorization, FlashQualification, SourceRegion, SourceReviewedAuthorization
-from .legacy_protocol import LegacySourceReviewedAuthorization
+from .legacy_protocol import LegacySourceReviewedAuthorization, ReceiverInitialization
 
 
 QUALIFICATIONS: tuple[FlashQualification, ...] = ()
@@ -31,7 +31,28 @@ SOURCE_REVIEWED_AUTHORIZATIONS: tuple[SourceReviewedAuthorization, ...] = (
         ),
     ),
 )
-LEGACY_SOURCE_REVIEWED_AUTHORIZATIONS: tuple[LegacySourceReviewedAuthorization, ...] = ()
+LEGACY_SOURCE_REVIEWED_AUTHORIZATIONS: tuple[LegacySourceReviewedAuthorization, ...] = (
+    LegacySourceReviewedAuthorization(
+        product_id=0x6008,
+        hardware_revision=None,
+        image_revision=0,
+        image_sha256="099101a6ca62321b76de2b7c61452342be794956a622aba542120125d91ffb97",
+        evidence=(
+            "Ultimate Bluetooth receiver 1.03 to official 1.04 only. "
+            "Boot entry, firmware target, initialization geometry, one existing application-page "
+            "checksum, and return to stable 1.03 verified on 2026-11-21. "
+            "The packaged boot prefix was source-reviewed; installed bootloader bytes were not read back. "
+            "Hardware revision is unreported. First installation and interrupted-update reflash "
+            "remain experimental; firmware writing and power-loss recovery are not hardware-validated. "
+            "Recovery in boot mode requires separately confirming a complete erase and reinstall "
+            "of the same cached image. See docs/legacy-receiver-protocol.md."
+        ),
+        source_versions=(103,),
+        initialization=ReceiverInitialization(0x4000, 0xFFFFFFFF, 0, 0x1000),
+        boot_prefix_sha256="4f9f771cd34c7147a9123c35f2aac3d397396071c58c9f6571b9efccfc64dc81",
+        boot_prefix_crc16=0x1ECD,
+    ),
+)
 
 
 def qualification_for(image: FirmwareImage, identity: DeviceIdentity) -> FlashAuthorization | None:
