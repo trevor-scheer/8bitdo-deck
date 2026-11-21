@@ -79,4 +79,5 @@ def public_job(job: dict) -> dict:
     return {key: job[key] for key in (
         "id", "state", "progress", "message", "can_install", "target_label",
         "evidence_level", "evidence",
+        "can_check_recovery", "recovery_ready", "recovery_action",
     ) if key in job}

@@ -18,7 +18,11 @@ from .legacy_protocol import (
     LegacySourceReviewedAuthorization, flash_boot_receiver, request_receiver_boot,
     validate_receiver_authorization,
 )
-from .protocol import flash_application, parse_firmware, query_identity, verify_authorization_sources
+from .protocol import (
+    DeviceIdentity, SourceReviewedAuthorization, flash_application,
+    parse_firmware, query_identity, verify_authorization_sources,
+)
+from .recovery import finish_recovery, inspect_recovery
 from .qualifications import qualification_for
 from .registry import MODELS, get_model
 from .transport import HidrawTransport
@@ -118,12 +122,13 @@ class Service:
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(source_root)
         command = [executable, "-m", "eightbitdo.worker", str(self.state_dir), job["id"], action]
-        if action == "install" and job.get("backend") == "hid":
+        if action in {"install", "recover"} and job.get("backend") == "hid":
             inhibitor = shutil.which("systemd-inhibit")
             if not inhibitor:
                 raise RuntimeError("Cannot prevent suspend during the native update.")
             command = [inhibitor, "--what=sleep", "--mode=block", "--who=8BitDo Deck",
                        "--why=Updating controller firmware", *command]
+        job["worker_action"] = action
         job["worker_pid"] = None
         job["started_at"] = time.time()
         self.store.save(job)
@@ -182,7 +187,7 @@ class Service:
                             self.store.save(job)
                 except RuntimeError:
                     pass
-        return public_job(job)
+        return self._public_recovery_job(job)
 
     def install_update(self, job_id: str) -> dict:
         with self.store.lock(job_id):
@@ -229,7 +234,7 @@ class Service:
         job.update(
             state="blocked", progress=100, can_install=False, backend="hid",
             version=image.version, sha256=artifact.sha256, artifact_path=artifact.path,
-            message="Firmware downloaded; model and version headers match. Native installation is awaiting hardware qualification. " + artifact.verification_note + " Firmware on the device is unchanged.",
+            message="Firmware downloaded; model and version headers match. Native installation is awaiting a reviewed update authorization. " + artifact.verification_note + " Firmware on the device is unchanged.",
         )
         if job["device_id"]:
             device = self._native_device(job["device_id"], model.id)
@@ -301,7 +306,7 @@ class Service:
             identity = query_identity(transport, usb_pid=int(device.pid, 16))
             qualification = qualification_for(image, identity)
             if qualification is None or identity.version != job.get("original_version"):
-                raise ValueError("The target or its hardware qualification changed. Prepare the update again.")
+                raise ValueError("The target or its update authorization changed. Prepare the update again.")
             if job.get('evidence_level') != qualification.evidence_level:
                 raise ValueError("The update evidence changed. Prepare and review the update again.")
             legacy_receiver = isinstance(qualification, LegacySourceReviewedAuthorization)
@@ -309,7 +314,8 @@ class Service:
                 validate_receiver_authorization(image, identity, qualification)
                 require_boot_access(device)
             job.update(state="installing", progress=0, can_install=False,
-                       original_version_raw=identity.version_raw,
+                       original_version_raw=identity.version_raw, original_usb_path=device.usb_path,
+                       original_hardware_revision=identity.hardware_revision, recovery_ready=False,
                        message="Installing the reviewed image. Keep the device connected.")
             self.store.save(job)
 
@@ -347,6 +353,166 @@ class Service:
             time.sleep(0.5)
         job.update(state="blocked", can_install=False, message="The image verified, but reconnection/version verification did not finish. Check the device before retrying.")
         self._save_progress(job)
+
+    def _recovery_context(self, job: dict, *, queued: bool = False):
+        states = {"queued"} if queued else {"failed", "blocked"}
+        if (
+            job.get("state") not in states or job.get("backend") != "hid"
+            or job.get("model_id") != "ultimate2-receiver"
+            or job.get("worker_action") not in {"install", "recover"}
+            or job.get("evidence_level") != "source-reviewed-experimental"
+            or type(job.get("original_version_raw")) is not int
+            or not 0 < job["original_version_raw"] <= 0xFFFF
+        ):
+            raise ValueError("This job has no reviewed Ultimate 2 receiver recovery path.")
+        port = job.get("original_usb_path")
+        if not isinstance(port, str) or not Path(port).is_absolute() or os.path.normpath(port) != port:
+            raise ValueError("The original physical USB port was not recorded.")
+        expected_id = "usb-" + hashlib.sha256(port.encode()).hexdigest()[:16]
+        if job.get("device_id") != expected_id:
+            raise ValueError("The recovery job does not match its original USB port.")
+        original = DeviceIdentity(0x6013, job["original_version_raw"],
+                                  hardware_revision=job.get("original_hardware_revision"))
+        if job.get("original_version") != original.version:
+            raise ValueError("The original firmware version record is inconsistent.")
+        cache = (self.state_dir / "firmware").resolve()
+        path = Path(job.get("artifact_path", ""))
+        if path.is_symlink() or not path.resolve().is_relative_to(cache):
+            raise ValueError("The firmware image is outside the validated cache.")
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != job.get("sha256"):
+            raise ValueError("The firmware image changed after preparation.")
+        image = parse_firmware(data, expected_pid=0x6013)
+        if image.version != job.get("version"):
+            raise ValueError("The firmware version changed after preparation.")
+        authorization = qualification_for(image, original)
+        if (
+            type(authorization) is not SourceReviewedAuthorization
+            or authorization.evidence_level != job.get("evidence_level")
+            or authorization.evidence != job.get("evidence")
+        ):
+            raise ValueError("The compiled source-reviewed recovery authorization changed or is unavailable.")
+        return image, authorization
+
+    def _public_recovery_job(self, job: dict) -> dict:
+        result = public_job(job)
+        try:
+            self._recovery_context(job)
+        except (OSError, ValueError, TypeError, RuntimeError):
+            result.update(can_check_recovery=False, recovery_ready=False)
+        else:
+            result["can_check_recovery"] = True
+        return result
+
+    def _recovery_device(self, job: dict) -> Device:
+        device = next((d for d in discover() if d.id == job["device_id"]), None)
+        if (
+            device is None or device.usb_path != job["original_usb_path"]
+            or device.vid != "2dc8" or device.backend != "hid"
+            or device.pid not in {"3208", "6013", "310b"}
+        ):
+            raise ValueError("The original receiver is not connected on its recorded USB port.")
+        return device
+
+    def _read_recovery_identity(self, device: Device, job: dict) -> DeviceIdentity:
+        if device.pid not in {"6013", "310b"} or not device.hid_paths:
+            raise ValueError("The receiver has not returned to application mode.")
+        with HidrawTransport(
+            device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"),
+            expected_usb_path=job["original_usb_path"],
+        ) as transport:
+            identity = query_identity(transport, usb_pid=int(device.pid, 16))
+        if identity.product_id != 0x6013 or not identity.target_verified or identity.beta:
+            raise ValueError("The returning device is not the expected stable Ultimate 2 receiver.")
+        return identity
+
+    def _record_recovery_version(self, job: dict, identity: DeviceIdentity) -> None:
+        job.update(can_install=False, recovery_ready=False, recovery_confirmed=False, progress=100)
+        if identity.version == job["version"]:
+            job.update(state="complete", recovery_action="target-confirmed",
+                       message=f"The same receiver reports firmware {identity.version}. The target version is verified.")
+        elif identity.version_raw == job["original_version_raw"]:
+            job.update(state="blocked", recovery_action="source-unchanged",
+                       message=f"The receiver is available with its original firmware {identity.version}; the update was not completed.")
+        else:
+            raise ValueError("The receiver reports an unexpected firmware version. Recovery was not confirmed.")
+
+    def check_recovery(self, job_id: str) -> dict:
+        """Inspect an eligible failed install without changing device mode or resetting."""
+        with self.store.lock(job_id):
+            job = self.store.read(job_id)
+            image, authorization = self._recovery_context(job)
+            job.update(recovery_ready=False, recovery_action=None, can_install=False)
+            self.store.save(job)
+            if not self.recovery_access.status()["configured"]:
+                raise ValueError("Configure receiver recovery access before checking recovery.")
+            with self.store.lock("update-" + job["device_id"]):
+                device = self._recovery_device(job)
+                if device.pid in {"6013", "310b"}:
+                    self._record_recovery_version(job, self._read_recovery_identity(device, job))
+                else:
+                    with wait_for_boot(device, self.state_dir / "locks") as boot:
+                        if boot.usb_pid != 0x3208:
+                            raise ValueError("Unexpected receiver recovery USB personality.")
+                        status = inspect_recovery(boot.transport, image, authorization=authorization)
+                    job.update(state="blocked", recovery_ready=status.can_reset, recovery_action=status.action,
+                               message=status.reason + ". No reset was sent.")
+            self.store.save(job)
+            return self._public_recovery_job(job)
+
+    def recover_update(self, job_id: str, confirmed: bool = False) -> dict:
+        if confirmed is not True:
+            raise ValueError("Review the recovery check and explicitly confirm recovery first.")
+        with self.store.lock(job_id):
+            job = self.store.read(job_id)
+            self._recovery_context(job)
+            if not self.recovery_access.status()["configured"]:
+                raise ValueError("Configure receiver recovery access before recovering firmware.")
+            if job.get("recovery_ready") is not True or job.get("recovery_action") not in {"finish-pending", "return-installed"}:
+                raise ValueError("Run a successful recovery check before confirming recovery.")
+            job.update(state="queued", recovery_ready=False, recovery_confirmed=True, can_install=False,
+                       progress=0, message="Starting confirmed recovery. Keep the receiver connected.")
+            self._spawn(job, "recover")
+            return public_job(job)
+
+    def run_recover(self, job: dict) -> None:
+        if job.get("worker_action") != "recover" or job.get("recovery_confirmed") is not True:
+            raise ValueError("This job has no confirmed recovery request.")
+        image, authorization = self._recovery_context(job, queued=True)
+        if not self.recovery_access.status()["configured"]:
+            raise ValueError("Configure receiver recovery access before recovering firmware.")
+        with self.store.lock("update-" + job["device_id"]):
+            device = self._recovery_device(job)
+            if device.pid in {"6013", "310b"}:
+                self._record_recovery_version(job, self._read_recovery_identity(device, job))
+                self.store.save(job)
+                return
+            job.update(state="verifying", recovery_ready=False, can_install=False,
+                       message="Rechecking receiver identity, bootloader, metadata, and firmware before recovery.")
+            self.store.save(job)
+            with wait_for_boot(device, self.state_dir / "locks") as boot:
+                if boot.usb_pid != 0x3208:
+                    raise ValueError("Unexpected receiver recovery USB personality.")
+                result = finish_recovery(boot.transport, image, authorization=authorization)
+            job.update(recovery_action=result.action, recovery_confirmed=False,
+                       message="Recovery reset sent. Waiting for the same receiver and verifying its firmware version.")
+            self._save_progress(job)
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                try:
+                    current = self._recovery_device(job)
+                    identity = self._read_recovery_identity(current, job)
+                    if result.vendor_copy_expected and identity.version != job["version"]:
+                        raise ValueError("The committed target version has not been verified.")
+                    self._record_recovery_version(job, identity)
+                    self._save_progress(job)
+                    return
+                except (OSError, ValueError, RuntimeError):
+                    pass
+                time.sleep(0.5)
+            job.update(state="blocked", recovery_ready=False, can_install=False,
+                       message="Recovery reset was sent, but the expected receiver version was not confirmed. Check recovery again; no reset was retried.")
+            self._save_progress(job)
 
     def _save_progress(self, job: dict) -> None:
         try:

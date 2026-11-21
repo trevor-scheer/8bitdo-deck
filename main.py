@@ -42,6 +42,12 @@ class Plugin:
     async def install_update(self, job_id: str):
         return await asyncio.to_thread(self.service.install_update, job_id)
 
+    async def check_recovery(self, job_id: str):
+        return await asyncio.to_thread(self.service.check_recovery, job_id)
+
+    async def recover_update(self, job_id: str, confirmed: bool = False):
+        return await asyncio.to_thread(self.service.recover_update, job_id, confirmed)
+
     async def export_diagnostics(self):
         return await asyncio.to_thread(self.service.export_diagnostics)
 

@@ -21,9 +21,14 @@ def main(argv: list[str] | None = None) -> int:
     prepare.add_argument("--device-id", default="")
     job = sub.add_parser("job", help="Read a background job's status")
     job.add_argument("job_id")
-    install = sub.add_parser("install", help="Install a prepared, supported fwupd release")
+    install = sub.add_parser("install", help="Install prepared firmware with a reviewed update authorization")
     install.add_argument("job_id")
     install.add_argument("--confirm", action="store_true", help="Confirm the target and version recorded in the job")
+    check_recovery = sub.add_parser("check-recovery", help="Inspect recovery for a failed receiver update without resetting")
+    check_recovery.add_argument("job_id")
+    recover = sub.add_parser("recover", help="Recover a checked receiver update and verify its returning version")
+    recover.add_argument("job_id")
+    recover.add_argument("--confirm", action="store_true", help="Confirm the verified recovery action")
     sub.add_parser("diagnostics", help="Export sanitized device information")
     sub.add_parser("official-updater", help="Open 8BitDo's web updater in Chrome")
     args = parser.parse_args(argv)
@@ -46,6 +51,12 @@ def main(argv: list[str] | None = None) -> int:
                 if not args.confirm:
                     parser.error("Review the job's target/version, then supply --confirm to install.")
                 result = service.install_update(args.job_id)
+            case "check-recovery":
+                result = service.check_recovery(args.job_id)
+            case "recover":
+                if not args.confirm:
+                    parser.error("Review check-recovery first, then supply --confirm to recover.")
+                result = service.recover_update(args.job_id, confirmed=True)
             case "diagnostics":
                 result = service.export_diagnostics()
             case "official-updater":

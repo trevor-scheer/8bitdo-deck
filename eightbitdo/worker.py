@@ -7,23 +7,28 @@ from .service import Service
 
 
 def run(state_dir: Path, job_id: str, action: str) -> None:
-    if action not in {"prepare", "install"}:
+    if action not in {"prepare", "install", "recover"}:
         raise ValueError("Unknown worker action.")
     service = Service(state_dir)
     with service.store.lock(job_id):
         job = service.store.read(job_id)
         if job["state"] != "queued":
             return
+        if job.get("worker_action", action) != action:
+            raise ValueError("Worker action does not match the queued job.")
         job["worker_pid"] = os.getpid()
         job["worker_start"] = Path("/proc/self/stat").read_text().split()[21]
         service.store.save(job)
         try:
             if action == "prepare":
                 service.run_prepare(job)
-            else:
+            elif action == "install":
                 service.run_install(job)
+            else:
+                service.run_recover(job)
         except Exception as error:
-            job.update(state="failed", can_install=False, message=clean_text(str(error), 1200) or "The update worker failed.")
+            job.update(state="failed", can_install=False, recovery_ready=False, recovery_confirmed=False,
+                       message=clean_text(str(error), 1200) or "The update worker failed.")
             service.store.save(job)
 
 

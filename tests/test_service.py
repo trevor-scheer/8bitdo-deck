@@ -280,7 +280,7 @@ class ServiceTests(unittest.TestCase):
                 patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
                 patch("eightbitdo.service.query_identity", return_value=DeviceIdentity(0x6013, 105)), \
                 patch("eightbitdo.service.flash_application") as flash:
-            with self.assertRaisesRegex(ValueError, "qualification"):
+            with self.assertRaisesRegex(ValueError, "authorization"):
                 self.service.run_install(job)
         flash.assert_not_called()
 
