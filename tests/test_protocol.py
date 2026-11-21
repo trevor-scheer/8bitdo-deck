@@ -379,6 +379,27 @@ class ProtocolTests(unittest.TestCase):
                 self.assertNotIn(0xC4, transport.commands)
                 self.assertNotIn(7, transport.commands)
 
+    def test_erase_and_write_totals_match_official_desktop_packets(self):
+        class DesktopPacketDevice(FlashDevice):
+            def send(self, report):
+                command, _, length, _, total, _ = struct.unpack_from("<HHHHII", report, 2)
+                # Native DLL helpers 10422390 (erase) and 104302a0 (write).
+                expected_total = 0 if command == 4 else length
+                if command in checked_commands and total != expected_total:
+                    raise ProtocolError("Unexpected erase/write total length")
+                super().send(report)
+
+        for checked_commands in ({4}, {3}):
+            for pid in (0x6012, 0x6013):
+                with self.subTest(commands=checked_commands, pid=pid):
+                    image = parse_firmware(firmware(pid=pid, size=4225))
+                    transport = DesktopPacketDevice(pid=pid, size=4225)
+                    result = flash_application(
+                        transport, image, identity=DeviceIdentity(pid, 106),
+                        qualification=qualification(image),
+                    )
+                    self.assertEqual(result.bytes_verified, 4225)
+
     def test_changed_device_stops_before_erase(self):
         image = parse_firmware(firmware())
         transport = QueueTransport([product_reply(), identity_report(version=108)])
