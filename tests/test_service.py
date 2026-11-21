@@ -249,14 +249,16 @@ class ServiceTests(unittest.TestCase):
                 patch('eightbitdo.service.request_receiver_boot') as enter, \
                 patch('eightbitdo.service.wait_for_boot', return_value=boot_context), \
                 patch('eightbitdo.service.flash_boot_receiver') as legacy_flash, \
-                patch('eightbitdo.service.flash_application') as modern_flash:
+                patch('eightbitdo.service.flash_application') as modern_flash, \
+                patch('eightbitdo.service.wait_for_application') as returned:
             self.service.run_install(job)
         access.assert_called_once_with(device)
         enter.assert_called_once()
         legacy_flash.assert_called_once()
         self.assertEqual(legacy_flash.call_args.kwargs['boot_usb_pid'], 0x3208)
         modern_flash.assert_not_called()
-        self.assertEqual(reconnect.call_count, 2)
+        self.assertEqual(reconnect.call_count, 1)
+        returned.assert_called_once_with(device, self.root / "locks", expected_product_id=0x6008, expected_version_raw=104)
         self.assertEqual(self.service.get_job(job['id'])['state'], 'complete')
 
     def test_legacy_permission_preflight_failure_never_changes_mode(self):
@@ -306,10 +308,12 @@ class ServiceTests(unittest.TestCase):
                 patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
                 patch("eightbitdo.service.query_identity", return_value=DeviceIdentity(0x6013, 105)), \
                 patch("eightbitdo.service.qualification_for", return_value=record), \
-                patch("eightbitdo.service.flash_application") as flash:
+                patch("eightbitdo.service.flash_application") as flash, \
+                patch("eightbitdo.service.wait_for_application") as returned:
             self.service.run_install(job)
         flash.assert_called_once()
-        self.assertEqual(rediscover.call_count, 2)
+        self.assertEqual(rediscover.call_count, 1)
+        returned.assert_called_once_with(device, self.root / "locks", expected_product_id=0x6013, expected_version_raw=106)
         self.assertEqual(self.service.get_job(job["id"])["state"], "complete")
 
     def test_returning_beta_with_target_number_does_not_complete_native_update(self):
@@ -377,7 +381,8 @@ class ServiceTests(unittest.TestCase):
                 patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
                 patch("eightbitdo.service.query_identity", return_value=DeviceIdentity(0x6013, 105)), \
                 patch("eightbitdo.service.qualification_for", return_value=record), \
-                patch("eightbitdo.service.flash_application", side_effect=perform_flash):
+                patch("eightbitdo.service.flash_application", side_effect=perform_flash), \
+                patch("eightbitdo.service.wait_for_application"):
             self.service.run_install(job)
         self.assertEqual(job["state"], "complete")
         self.assertIn("reporting_error", job)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .catalog import Catalog
 from .access import RecoveryAccess
-from .connection import require_boot_access, wait_for_boot
+from .connection import require_boot_access, wait_for_application, wait_for_boot
 from .discovery import Device, clean_text, discover, inspect_device
 from .fwupd import Fwupd, FwupdError
 from .jobs import ACTIVE_STATES, JobStore, default_state_dir, public_job
@@ -340,18 +340,15 @@ class Service:
                                     qualification=qualification, progress=progress)
         job.update(state="verifying", progress=95, message="Waiting for the same USB target and checking its firmware version.")
         self._save_progress(job)
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            try:
-                device = self._native_device(job["device_id"], model.id)
-                if device.firmware_version == job["version"]:
-                    job.update(state="complete", progress=100, message=f"Update complete. The device reports firmware {job['version']}.")
-                    self._save_progress(job)
-                    return
-            except (OSError, ValueError, RuntimeError):
-                pass
-            time.sleep(0.5)
-        job.update(state="blocked", can_install=False, message="The image verified, but reconnection/version verification did not finish. Check the device before retrying.")
+        try:
+            wait_for_application(
+                device, self.state_dir / "locks", expected_product_id=image.product_id,
+                expected_version_raw=image.version_raw & 0xFFFF,
+            )
+        except (OSError, ValueError, RuntimeError):
+            job.update(state="blocked", can_install=False, message="The image verified, but reconnection/version verification did not finish. Check the device before retrying.")
+        else:
+            job.update(state="complete", progress=100, message=f"Update complete. The device reports firmware {job['version']}.")
         self._save_progress(job)
 
     def _recovery_context(self, job: dict, *, queued: bool = False):
