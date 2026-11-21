@@ -422,6 +422,13 @@ the returned result; this function never declares a completed update.
             notify("writing", offset + len(chunk), total)
         notify("verifying", block_start, total)
         _verify_block(transport, block_start, block, staging_base=STAGING_BASES[identity.product_id])
+    # Recheck earlier blocks after all writes, before making the staged image bootable.
+    for block_start in range(0, total, BLOCK_SIZE):
+        notify("verifying", block_start, total)
+        _verify_block(
+            transport, block_start, image.payload[block_start:block_start + BLOCK_SIZE],
+            staging_base=STAGING_BASES[identity.product_id],
+        )
     notify("committing", total, total)
     _exchange(transport, 0xC4, data=struct.pack("<II", total, image.version_raw), total_length=8)
     notify("restarting", total, total)

@@ -271,7 +271,7 @@ class ProtocolTests(unittest.TestCase):
                                                qualification=qualification(image))
                     reads = [struct.unpack_from("<HHHHII", report, 2)
                              for report in transport.sent if report[2:4] == b"\x05\0"]
-                    self.assertEqual(sum(header[2] for header in reads), size)
+                    self.assertEqual(sum(header[2] for header in reads), size * 2)
                     self.assertEqual(result.bytes_verified, size)
                     self.assertEqual(transport.commands[-2:], [0xC4, 7])
 
@@ -343,9 +343,9 @@ class ProtocolTests(unittest.TestCase):
                          for report in transport.sent if report[2:4] == b"\x05\0"]
                 logical_offsets = list(range(0, 4096, 46)) + list(range(4096, 4150, 46))
                 self.assertEqual(writes, logical_offsets)
-                self.assertEqual(reads, [staging_base + offset for offset in logical_offsets])
+                self.assertEqual(reads, [staging_base + offset for offset in logical_offsets] * 2)
                 self.assertEqual(transport.commands.count(4), 2)
-                self.assertEqual(transport.commands.count(0xC3), 2)
+                self.assertEqual(transport.commands.count(0xC3), 4)
                 self.assertEqual(transport.commands[:3], [8, 0x2100, 0xC1])
                 self.assertEqual(transport.commands[-2:], [0xC4, 7])
                 self.assertEqual(struct.unpack_from("<HHHHII", transport.sent[-2], 2)[4:], (8, 0))
