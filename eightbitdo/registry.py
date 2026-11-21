@@ -19,7 +19,7 @@ MODELS = (
     Model("ultimate2-controller", "Ultimate 2 Wireless controller", "controller", 94, 0x6012,
           "Connect the controller directly with a USB data cable. The receiver has separate firmware."),
     Model("ultimate2-receiver", "Ultimate 2 Wireless receiver", "receiver", 95, 0x6013,
-          "Connect the USB receiver to the Deck, directly or through its dock. Turn the paired controller off to inspect the receiver."),
+          "Connect the USB receiver to the Deck, directly or through its dock. Paired controller status is shown separately from receiver firmware."),
     Model("ultimate-bluetooth-controller", "Ultimate Bluetooth controller (80NA)", "controller", 41, 0x6007,
           "Connect the controller with a USB data cable so the app can identify its firmware target. The receiver has separate firmware."),
     Model("ultimate-bluetooth-receiver", "Ultimate Bluetooth receiver (80NA)", "receiver", 42, 0x6008,
