@@ -156,15 +156,24 @@ def request_receiver_boot(transport: ReportTransport, *, identity: DeviceIdentit
     transport.send(BOOT_ENTRY_REPORT)
 
 
+def _reset_boot(transport: ReportTransport) -> None:
+    # The vendor reads the reset ACK before closing HID. Live hardware stayed
+    # in boot mode when HID closed immediately after sending; reopening the
+    # input endpoint allowed it to return to the application.
+    # A missing ACK remains an error; neither disconnect nor timeout proves boot.
+    _exchange(transport, 7)
+
+
 def reset_receiver_boot(transport: ReportTransport, *, usb_pid: int) -> None:
     """Reset a verified receiver without initializing, erasing, or saving firmware.
 
-    The caller must verify application re-enumeration. A reset can disconnect the
-    interface before its acknowledgment is read.
+    Keep HID open until the reset acknowledgment is consumed, then the caller
+    must verify application re-enumeration. Missing or invalid replies propagate
+    without retrying reset; a disconnect does not establish successful boot.
     """
     if query_boot_target(transport, usb_pid=usb_pid) != RECEIVER_PID:
         raise FirmwareMismatch("Bootloader belongs to another 8BitDo model")
-    transport.send(build_boot_command(7))
+    _reset_boot(transport)
 
 
 def _validate_image(image: FirmwareImage) -> None:
@@ -296,5 +305,5 @@ def flash_boot_receiver(
     verify_page(0)
     verify_page(1)
     notify("restarting", total, total)
-    transport.send(build_boot_command(7))
+    _reset_boot(transport)
     return FlashResult(RECEIVER_PID, image.version, total)
