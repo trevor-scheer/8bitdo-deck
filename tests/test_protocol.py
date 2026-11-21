@@ -361,6 +361,24 @@ class ProtocolTests(unittest.TestCase):
             flash_application(transport, image, identity=DeviceIdentity(0x6013, 106), qualification=bad)
         self.assertEqual(transport.sent, [])
 
+    def test_later_write_corrupting_verified_block_stops_before_commit(self):
+        class DisturbingWriteDevice(FlashDevice):
+            def send(self, report):
+                super().send(report)
+                command, _, _, _, _, offset = struct.unpack_from("<HHHHII", report, 2)
+                if command == 3 and offset == 4096:
+                    self.memory[self.staging_base + 128] ^= 1
+
+        for pid in (0x6012, 0x6013):
+            with self.subTest(pid=pid):
+                image = parse_firmware(firmware(pid=pid, size=4225))
+                transport = DisturbingWriteDevice(pid=pid, size=4225)
+                with self.assertRaisesRegex(ProtocolError, "CRC verification"):
+                    flash_application(transport, image, identity=DeviceIdentity(pid, 106),
+                                      qualification=qualification(image))
+                self.assertNotIn(0xC4, transport.commands)
+                self.assertNotIn(7, transport.commands)
+
     def test_changed_device_stops_before_erase(self):
         image = parse_firmware(firmware())
         transport = QueueTransport([product_reply(), identity_report(version=108)])
