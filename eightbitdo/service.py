@@ -123,11 +123,11 @@ class Service:
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(source_root)
         command = [executable, "-m", "eightbitdo.worker", str(self.state_dir), job["id"], action]
-        if action in {"install", "recover"} and job.get("backend") == "hid":
+        if action == "install" or (action == "recover" and job.get("backend") == "hid"):
             inhibitor = shutil.which("systemd-inhibit")
             launcher = shutil.which("systemd-run")
             if not inhibitor or not launcher:
-                raise RuntimeError("Cannot prevent suspend during the native update: user-session tools are unavailable.")
+                raise RuntimeError("Cannot prevent suspend during the firmware update: user-session tools are unavailable.")
             self.store.path(job["id"])
             unit = f"8bitdo-deck-{job['id']}-{uuid.uuid4().hex[:12]}"
             # Decky's unprivileged backend remains in a system-service cgroup.
