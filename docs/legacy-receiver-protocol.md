@@ -2,10 +2,10 @@
 
 `eightbitdo/legacy_protocol.py` implements the receiver-specific boot transaction
 found in 8BitDo's desktop updater. Its offline tests establish packet encoding,
-image offsets, operation ordering, and failure handling. They do not qualify
-hardware. The service registry must separately establish a receiver's boot
-transition, initialization tuple, recovery, and firmware compatibility before
-enabling installation.
+image offsets, operation ordering, and failure handling. A bounded hardware
+check established boot entry, target `6008`, the initialization tuple, and
+return to runtime 1.03. This does not qualify firmware installation or recovery
+after interrupted writes. The legacy authorization registry remains empty.
 
 The original Ultimate Bluetooth receiver has firmware PID `6008`, catalog type
 `42`, and model identifier `80NA_R`. Runtime USB PID `3109` is shared with other
@@ -50,9 +50,8 @@ The output starts `81 05 00 51 00`; all remaining bytes are zero.
 
 Native enumeration at `10004f4e`–`10004f9f` sets the boot transport flag for
 VID `2dc8`, PID `3208` or `3002`. The update dispatcher at `100067c1` enters
-`1000bd20` through that flag. These are supported backend interfaces; a
-particular receiver's actual transition still needs observation on the same
-physical USB port.
+`1000bd20` through that flag. The tested receiver transitioned from runtime
+`3109` to boot `3208` on the same physical USB port; `3002` remains an unobserved alternative for this model.
 
 `100053a0` writes an API report selector of zero followed by a 64-byte
 unnumbered output packet. The payload begins with class `05`, followed by
@@ -100,9 +99,14 @@ Reset routine `1000a0e0` constructs this 65-byte, zero-padded output:
 ```
 
 The reset routine does not call initialization, erase, write, or save. The
-backend queries PID `6008` before sending reset. A successful return to runtime
-must be verified after the device disconnects; an acknowledgment alone is not
-completion evidence.
+backend queries PID `6008` before sending reset. Native code at `1000a1de`
+also invokes receive helper `10005720` after the reset write. Keep the HID
+handle open while awaiting the acknowledgment or a recognized USB-disconnect
+error: closing immediately after the write stalled the tested receiver in boot
+mode. A disconnect during receive can precede delivery of the acknowledgment. Reopening for input, without another
+output report, allowed it to return to runtime. A successful return must be
+verified on the same USB port; an acknowledgment alone is not completion
+evidence.
 
 Host code proves which commands the application sends. It does not prove the
 device boot handler has no persistent side effects. Do not describe an
@@ -164,8 +168,8 @@ have identical first `4000` bytes after the DAT header. Static extraction finds
 Jieli filesystem version 2, PID `80NA_R`, 4096-byte alignment, `uboot.boot` at
 `00a0`, `isd_config.ini` at `36f0`, and `app_dir_head` at `4000` with length
 `ffffffff`. Application writes therefore start after the bootloader and top
-filesystem directory. The fixture tuple `(4000, ffffffff, 0, 1000)` is derived
-from those metadata and code paths; it has not been recorded from hardware.
+filesystem directory. The tuple `(4000, ffffffff, 0, 1000)` follows from those
+metadata and code paths and matched the tested receiver's live `C1` response.
 
 For reproducibility, remove the 28-byte DAT header and run
 `firmware/fwunpack_newfw.py`, then `firmware/debank.py` on `top/uboot.boot`,
@@ -176,7 +180,10 @@ bank CRCs. The resulting bank has 13888 bytes, load address `4000`, and SHA-256
 The [PI32v2 SLEIGH definitions](https://github.com/quarkslab/ghidra-jieli) at
 commit `e1bd0707874b77b759401555d24839ad43af1267` permit static disassembly.
 Some stack-mask instructions need manual decoding; parallel operations use
-register values before the paired instruction. Addresses below are bank
+register values before the paired instruction. The unsigned byte-load immediate
+constructor also shifts its upper nibble by eight instead of four: the exit flag
+stored at `6036` is printed correctly as offset `1c`, while its matching load at
+`618a` is incorrectly printed as `10c`. Addresses below are bank
 addresses, not Windows DLL addresses.
 
 | Boot address | Established behavior |
@@ -193,10 +200,17 @@ addresses, not Windows DLL addresses.
 The bootloader startup is **not universally read-only**. At `595c`, a boot
 base of `10000` enters a migration path that erases and copies boot data
 (`598c`, `599e`, `59b6`). The initial base comes from a ROM/caller argument
-captured at `6f62`. The official images have base zero, which is consistent
-with skipping migration, but an image file does not establish the live ROM
-argument. Do not classify every application-to-boot transition as having no
-persistent side effects.
+captured at `6f62`. However, the normal application-launch path at `58c8`
+requires that base to match the mounted filesystem's expected base, zero in
+all four official images. The retained-RAM upgrade marker is consumed only
+after mounting; it does not select a different base.
+
+For a normally running, unmodified official 1.03 image with unchanged flash,
+this supports the inference that ordinary upgrade entry preserves the normal
+base and skips migration. The `10000` branch handles an alternate boot layout,
+not routine entry from that stock layout. This is a bounded inference from the
+loader and image, not a readback of the installed bootloader or a guarantee for
+modified, damaged, or previously interrupted installations.
 
 Startup checks the application filesystem header. An invalid application
 header can route through `58da` to reopening the preserved top-level
@@ -214,9 +228,9 @@ user's receiver.
 
 ### Application boot-entry follow-up
 
-Static inspection of the extracted applications narrows the entry path but
-**does not eliminate the migration exception**. The version 1.03 application
-SHA-256 is `41cb3846b0005d29f69880f87603f43111ed196bbaa2dd8b7cc1177d5550b7d3`;
+Static inspection of the extracted applications identifies the normal entry
+path; the alternate-layout migration exception remains as described above.
+The version 1.03 application SHA-256 is `41cb3846b0005d29f69880f87603f43111ed196bbaa2dd8b7cc1177d5550b7d3`;
 version 1.04 is `a21c0fa6e0d35fe0933dbc4cc95f9cd789f6db2b8c7c29c7b3b23c67e1e874da`.
 These are hashes of statically extracted `app.bin`, distinct from DAT hashes.
 
@@ -233,18 +247,56 @@ base. The bootloader's `4dfe` routine checks and clears that same retained-RAM
 magic. The inspected Jieli BR23 linker definitions independently name
 `10800` as `nvram_list` and `1127a8` as `memcpy`.
 
-The vendor parser's visible application caller uses an internal `66 aa`
-envelope. The normalization of the complete USB report `81 05 00 51 00` into
-that envelope was not fully traced. The desktop updater independently proves
-which USB report it sends; the application findings do not constitute a
-complete proof of every intervening path or side effect.
+The 1.03 USB dispatcher at `01e017f8` selects handling by runtime personality.
+The path through `01e018ee` passes the report after its first two bytes to
+parser `01e01686`, which dispatches command `51`. Other personalities use an
+internal `66 aa` envelope; that envelope is not required on every route.
+The desktop updater establishes the complete USB report, and the hardware
+check below confirms it reaches this receiver's boot mode.
 
-Even if that linkage is completed, the identified reset routine does not
-establish the subsequent ROM-supplied `[r0+4]` boot-base argument. ROM selection
-and the installed flash layout remain outside this trace. Identical official
-boot prefixes and the zero-based packaged layout are compatibility evidence,
-not proof that the live migration guard is false. This follow-up does not
-justify marking boot entry read-only or enabling a write authorization.
+For parameter zero, `01e00e50` posts key event `17`; its consumer at
+`01e069b8` calls the final entry routine. The RAM reset routine at offset
+`010a`, executed through alias `0200010a`, sets the reset control through
+hardware portal `001e3e08`. No flash erase or program call was found in this
+bounded entry path. Generic event callbacks and ROM internals were not fully
+audited, so this does not establish every possible side effect.
+
+### Bounded hardware check
+
+On 2026-11-21, an original Ultimate Bluetooth receiver running stable 1.03
+accepted the vendor entry report and appeared as `2dc8:3208` on the same USB
+port. Its 33-byte HID report descriptor had SHA-256
+`7609e5ff7ce50b05ca9d2bfd8403bbe00069d6e3c9ad30021c75bf0016f2eec3`.
+Command `08` returned firmware PID `6008`; default `C1` returned
+`(4000, ffffffff, 0, 1000)`.
+
+The first reset check sent one `07` and immediately closed the handle. The
+receiver remained in boot mode through the 30-second application wait.
+Reopening the boot interface for input only allowed it to return to runtime
+`3109`, stable 1.03, within 3.7 seconds. No second reset or other output report
+was sent during that recovery. This establishes that maintaining input polling
+matters on this hardware; it does not identify the exact internal stall point.
+A subsequent check kept input open and observed USB-disconnect error `EIO`
+during the reset receive. A separate application wait immediately verified
+`3109`, stable 1.03, on the same port, without another reset. An acknowledgment
+is therefore not guaranteed to arrive before the receiver disconnects. The
+final routine accepts only `EIO`, `ENODEV`, or `ENXIO` during receive and still
+requires the expected application identity; send errors and timeouts remain
+failures.
+
+A read-only `C3` query for the existing page at relative offset `2000`, length
+4096, returned CRC `75a9`. This matched bytes `6000`–`6fff` of the official 1.03
+DAT payload. It checks one application page, not the installed boot prefix.
+
+The corrected production routine completed the whole round trip in 4.765
+seconds: stable 1.03 → boot `3208` → target `6008` → matching `C1` tuple and
+`C3` page CRC → one reset `07` → receive disconnect `EIO` → same-port runtime
+`3109`, stable 1.03. The reset helper reported `ack_received=False`; the final
+identity check established success.
+
+No erase, write, or `C2` command was sent. The final version was checked, but
+flash was not read back byte for byte. Firmware installation, power-loss
+recovery, and installed bootloader fingerprinting remain unvalidated.
 
 ## Experimental authorization and connection handoff
 
@@ -266,9 +318,9 @@ An initial user-run update can therefore be authorized explicitly as an
 experimental source-reviewed transaction, without inventing a previous
 successful flash. The service must preserve that label and disclose its
 remaining hardware/recovery limits. No enabled authorization record is
-provided by this backend. Boot entry belongs only to the confirmed update
-transaction because of the conditional migration behavior described above;
-it is not part of ordinary discovery or a supposedly read-only preview.
+provided by this backend. Boot entry remains outside ordinary discovery and
+preview. The bounded stock-layout check above does not authorize an update or
+establish safe entry for arbitrary recovery states.
 
 `connection.require_boot_access` checks setup and runtime access before entry.
 `wait_for_boot` opens only a boot interface on the original physical USB port,
@@ -280,11 +332,12 @@ wrong identity cannot mark an update complete.
 
 ## Qualification still required
 
-Before the service enables a receiver update, record the actual runtime-to-boot
-transition, descriptor, target reply, and return to runtime. Separately
-establish the live initialization tuple, bootloader compatibility, power-loss
-recovery, and the intended firmware/version combination. Static analysis of
-`C1` and `C2` does not replace those hardware checks.
+The bounded check establishes the runtime-to-boot transition, descriptor, target
+reply, initialization tuple, one application-page CRC, and return to runtime
+through the corrected production reset routine for one receiver.
+Installed bootloader compatibility, power-loss recovery, and the intended
+firmware/version combination require separate evidence before claiming hardware
+qualification. Static analysis of `C1` and `C2` does not replace those checks.
 
 The desktop `UpdatePrompt.changeUIAndTest` (managed RVA `1b3fc`, IL offsets
 `5eb`–`629`) groups types `35`, `42`, and `44` and displays only the instruction
