@@ -85,7 +85,7 @@ class FlashDevice:
             start, count, block = struct.unpack("<III", payload)
             assert block == 4096
             start += self.staging_base
-            checked = self.memory[start:start + ((count >> 7) & 0x7F) * 128]
+            checked = self.memory[start:start + ((count >> 7) & 0xFF) * 128]
             data = struct.pack("<HI", crc16(checked) ^ int(self.bad_crc), sum(checked) ^ int(self.bad_sum))
         if command == 5 and not status:
             data = bytes(self.memory[offset:offset + length])

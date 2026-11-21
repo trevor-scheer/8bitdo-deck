@@ -19,6 +19,8 @@ BLOCK_SIZE = 4096
 MAX_IMAGE_SIZE = 8 * 1024 * 1024
 MODERN_PIDS = frozenset({0x6012, 0x6013})
 STAGING_BASES = {0x6012: 0x32000, 0x6013: 0x13000}
+# Keep the rounded installed image below metadata and the staging image within writable flash.
+MAX_APPLICATION_SIZES = {0x6012: 0x2C000, 0x6013: 0xC000}
 # Desktop updater model tags, not USB PIDs; see docs/protocol.md.
 LEGACY_TARGETS = {
     0x3109: {0x0023: 0x6008, 0x3013: 0x3013, 0x9023: 0x3013},
@@ -182,9 +184,20 @@ def parse_command_reply(report: bytes) -> CommandReply:
     if not 18 <= len(report) <= REPORT_SIZE or report[:2] != b"\x02\x05":
         raise ProtocolError("Not an application-mode class-05 reply")
     status, command, length, checksum, total, offset = HEADER.unpack_from(report, 2)
-    if length > PAYLOAD_SIZE or len(report) < 18 + length:
+    if length > PAYLOAD_SIZE:
+        raise ProtocolError("Reply payload is oversized")
+    # These handlers echo the request length, independently of the response data size.
+    payload_length = length
+    if status == 0:
+        if command in (0xC1, 0xC3):
+            declared, payload_length = {0xC1: (0, 16), 0xC3: (12, 6)}[command]
+            if length != declared:
+                raise ProtocolError("Reply length does not match the command format")
+        elif command in (3, 4, 7, 0xC4):
+            payload_length = 0
+    if len(report) < 18 + payload_length:
         raise ProtocolError("Reply payload is truncated or oversized")
-    return CommandReply(status, command, length, checksum, total, offset, report[18:18 + length])
+    return CommandReply(status, command, length, checksum, total, offset, report[18:18 + payload_length])
 
 
 def parse_identity_reply(
@@ -312,14 +325,26 @@ def _exchange(
         raise ProtocolError("Device acknowledged a different command")
     if reply.status != 0:
         raise ProtocolError(f"Device rejected command {command:04x} with status {reply.status:04x}")
+    _, _, length, checksum, total, offset = HEADER.unpack_from(report, 2)
+    if command == 8:
+        if reply.length not in (2, 4) or reply.total_length != reply.length:
+            raise ProtocolError("Malformed product-ID response")
+        length, total = reply.length, reply.total_length
+    if (reply.length, reply.crc, reply.total_length, reply.offset) != (length, checksum, total, offset):
+        raise ProtocolError("Device acknowledgment header does not match the request")
     return reply
 
 
 def _verify_block(transport: ReportTransport, offset: int, block: bytes, *, staging_base: int) -> None:
     request = struct.pack("<III", offset, len(block), BLOCK_SIZE)
     reply = _exchange(transport, 0xC3, data=request, total_length=len(request), offset=offset)
-    if len(reply.payload) != 2 or struct.unpack("<H", reply.payload)[0] != crc16(block):
+    # Firmware checks complete 128-byte units; exact readback below also covers the remaining tail.
+    covered = block[:len(block) // 128 * 128]
+    device_crc, device_sum = struct.unpack("<HI", reply.payload)
+    if device_crc != crc16(covered):
         raise ProtocolError("Device firmware CRC verification failed")
+    if device_sum != sum(covered):
+        raise ProtocolError("Device firmware additive checksum verification failed")
     for position in range(0, len(block), PAYLOAD_SIZE):
         expected = block[position:position + PAYLOAD_SIZE]
         # Write/erase/CRC commands add the staging base; command 05 reads absolute flash addresses.
@@ -358,8 +383,13 @@ the returned result; this function never declares a completed update.
         or identity.beta != 0
     ):
         raise FirmwareMismatch("Firmware, hardware, and qualification record do not match")
-    if image.address != 0x5000 or len(image.payload) > 0x3B000 or image.payload[8:12] != b"KNLT":
+    if image.address != 0x5000 or len(image.payload) < 32 or image.payload[8:12] != b"KNLT":
         raise UnsupportedProtocol("Firmware is not the qualified Ultimate 2 Telink image layout")
+    rounded_size = (len(image.payload) + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE
+    if rounded_size > MAX_APPLICATION_SIZES[identity.product_id]:
+        raise UnsupportedProtocol("Firmware exceeds the model's installed or staging flash bounds")
+    if int.from_bytes(image.payload[28:30], "little") != identity.product_id:
+        raise FirmwareMismatch("Embedded firmware product ID does not match the target")
     encoded_image = FIRMWARE_HEADER.pack(
         image.version_raw, image.address, len(image.payload), image.product_id,
         image.reserved1, image.revision, image.reserved2,
@@ -372,6 +402,11 @@ the returned result; this function never declares a completed update.
     total = len(image.payload)
     notify = progress or (lambda stage, done, size: None)
     notify("preparing", 0, total)
+    initialization = _exchange(transport, 0xC1)
+    initial_address = struct.unpack_from("<I", initialization.payload)[0]
+    block_size = struct.unpack_from("<I", initialization.payload, 12)[0]
+    if initial_address != 0 or block_size != BLOCK_SIZE:
+        raise ProtocolError("Device initialization returned an unsupported flash block size")
     for block_start in range(0, total, BLOCK_SIZE):
         block = image.payload[block_start:block_start + BLOCK_SIZE]
         notify("erasing", block_start, total)
@@ -388,7 +423,7 @@ the returned result; this function never declares a completed update.
         notify("verifying", block_start, total)
         _verify_block(transport, block_start, block, staging_base=STAGING_BASES[identity.product_id])
     notify("committing", total, total)
-    _exchange(transport, 0xC4, data=struct.pack("<II", total, image.version_raw))
+    _exchange(transport, 0xC4, data=struct.pack("<II", total, image.version_raw), total_length=8)
     notify("restarting", total, total)
     transport.send(build_command(7))
     return FlashResult(image.product_id, image.version, total)
