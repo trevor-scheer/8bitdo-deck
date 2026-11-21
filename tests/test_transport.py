@@ -14,6 +14,10 @@ class TransportProfileTests(unittest.TestCase):
         self.app = HidrawTransport(Path('/dev/fake'), 0x6013, Path('/tmp/unused'))
         self.boot = BootHidrawTransport(Path('/dev/fake'), 0x3208, Path('/tmp/unused'), expected_usb_path='/sys/devices/fake')
 
+    def test_reviewed_ultimate2_boot_descriptor(self):
+        descriptor = bytes.fromhex("05 8c 09 01 a1 01 09 03 15 00 26 00 ff 75 08 95 40 81 02 09 04 15 00 26 00 ff 75 08 95 40 91 02 c0")
+        self.boot._check_descriptor(descriptor)
+
     def test_application_and_boot_interfaces_cannot_be_confused(self):
         self.app._check_descriptor(APPLICATION_DESCRIPTOR)
         self.boot._check_descriptor(BOOT_DESCRIPTOR)
