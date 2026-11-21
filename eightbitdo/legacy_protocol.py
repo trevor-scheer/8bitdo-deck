@@ -154,6 +154,26 @@ def query_boot_target(transport: ReportTransport, *, usb_pid: int) -> int:
     return int.from_bytes(payload, "little")
 
 
+def inspect_receiver_boot(
+    transport: ReportTransport,
+    *,
+    usb_pid: int,
+    expected_initialization: ReceiverInitialization,
+) -> ReceiverInitialization:
+    """Verify receiver target and RAM-only initialization without changing firmware.
+
+    The caller supplies a transport already bound to the intended physical USB
+    port and validated boot HID descriptor. Default C1 opens the application
+    directory in RAM; this helper never erases, programs, commits, or resets.
+    """
+    if query_boot_target(transport, usb_pid=usb_pid) != RECEIVER_PID:
+        raise FirmwareMismatch("Bootloader belongs to another 8BitDo model")
+    observed = ReceiverInitialization.from_payload(_exchange(transport, 0xC1, payload_size=16))
+    if observed != expected_initialization:
+        raise FirmwareMismatch("Receiver initialization differs from its qualification")
+    return observed
+
+
 def request_receiver_boot(transport: ReportTransport, *, identity: DeviceIdentity) -> None:
     """Request the vendor boot transition; caller must reconnect and match its USB port."""
     if identity.product_id != RECEIVER_PID or not identity.target_verified:
@@ -286,14 +306,10 @@ def flash_boot_receiver(
         image, identity, qualification, expected_initialization=expected_initialization,
     )
     plan = plan_receiver_flash(image, expected_initialization)
-    if query_boot_target(transport, usb_pid=boot_usb_pid) != RECEIVER_PID:
-        raise FirmwareMismatch("Bootloader belongs to another 8BitDo model")
     notify = progress or (lambda stage, done, total: None)
     total = len(plan.data)
     notify("preparing", 0, total)
-    observed = ReceiverInitialization.from_payload(_exchange(transport, 0xC1, payload_size=16))
-    if observed != expected_initialization:
-        raise FirmwareMismatch("Receiver initialization differs from its qualification")
+    inspect_receiver_boot(transport, usb_pid=boot_usb_pid, expected_initialization=expected_initialization)
     for offset in range(0, total, PAGE_SIZE):
         notify("erasing", offset, total)
         _exchange(transport, 4, total_length=PAGE_SIZE, offset=offset, timeout=30.0)

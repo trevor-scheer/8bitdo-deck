@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from eightbitdo.legacy_protocol import (
     BOOT_ENTRY_REPORT, LegacySourceReviewedAuthorization, ReceiverInitialization, build_boot_command,
-    flash_boot_receiver, parse_boot_reply, plan_receiver_flash,
+    flash_boot_receiver, inspect_receiver_boot, parse_boot_reply, plan_receiver_flash,
     query_boot_target, request_receiver_boot, reset_receiver_boot, validate_receiver_authorization,
 )
 from eightbitdo.protocol import (
@@ -158,6 +158,57 @@ class LegacyProtocolTests(unittest.TestCase):
         with self.assertRaises(ProtocolTimeout):
             query_boot_target(transport, usb_pid=0x3208)
         self.assertEqual(len(transport.sent), 1)
+
+    def test_boot_inspection_only_queries_target_and_exact_initialization(self):
+        transport = QueueTransport([
+            reply(8, b"\x08\x60"), reply(0xC1, struct.pack("<4I", 0x4000, 0xFFFFFFFF, 0, 4096)),
+        ])
+        observed = inspect_receiver_boot(
+            transport, usb_pid=0x3208, expected_initialization=INITIALIZATION,
+        )
+        self.assertEqual(observed, INITIALIZATION)
+        self.assertEqual(transport.sent, [
+            build_boot_command(8, length=2, total_length=2), build_boot_command(0xC1),
+        ])
+        self.assertEqual(transport.reports, [])
+
+    def test_boot_inspection_rejects_wrong_target_before_initialization(self):
+        transport = QueueTransport([reply(8, b"\x13\x60")])
+        with self.assertRaises(FirmwareMismatch):
+            inspect_receiver_boot(transport, usb_pid=0x3208, expected_initialization=INITIALIZATION)
+        self.assertEqual(transport.sent, [build_boot_command(8, length=2, total_length=2)])
+        transport = QueueTransport()
+        with self.assertRaises(UnsupportedProtocol):
+            inspect_receiver_boot(transport, usb_pid=0x3109, expected_initialization=INITIALIZATION)
+        self.assertEqual(transport.sent, [])
+
+    def test_boot_inspection_requires_all_four_initialization_fields(self):
+        for field in INITIALIZATION.__dataclass_fields__:
+            changed = replace(INITIALIZATION, **{field: getattr(INITIALIZATION, field) ^ 1})
+            with self.subTest(field=field):
+                transport = QueueTransport([
+                    reply(8, b"\x08\x60"), reply(0xC1, struct.pack("<4I", *changed.__dict__.values())),
+                ])
+                with self.assertRaises(FirmwareMismatch):
+                    inspect_receiver_boot(transport, usb_pid=0x3208, expected_initialization=INITIALIZATION)
+                self.assertEqual(transport.sent, [
+                    build_boot_command(8, length=2, total_length=2), build_boot_command(0xC1),
+                ])
+
+    def test_boot_inspection_failure_never_retries_or_resets(self):
+        for response, error in (
+            (TimeoutError("no reply"), ProtocolTimeout),
+            (reply(0xC1)[:33], ProtocolError),
+            (reply(0xC1, status=1), ProtocolError),
+            (OSError(errno.EIO, "disconnected"), OSError),
+        ):
+            with self.subTest(response=response):
+                transport = QueueTransport([reply(8, b"\x08\x60"), response])
+                with self.assertRaises(error):
+                    inspect_receiver_boot(transport, usb_pid=0x3208, expected_initialization=INITIALIZATION)
+                self.assertEqual(transport.sent, [
+                    build_boot_command(8, length=2, total_length=2), build_boot_command(0xC1),
+                ])
 
     def test_boot_entry_rechecks_the_runtime_identity(self):
         transport = QueueTransport([bytes.fromhex("02226700008023000131").ljust(64, b"\0")])
