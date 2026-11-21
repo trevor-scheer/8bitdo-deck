@@ -98,6 +98,31 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(device.role, "unknown")
         self.assertFalse(device.can_update)
 
+    def test_original_bluetooth_receiver_is_identified_from_official_usb_map(self):
+        self.fixture.usb(pid="3109", product="Ultimate Wireless Controller")
+        device, = self.scan()
+        self.assertEqual(device.model_id, "ultimate-bluetooth-receiver")
+        self.assertEqual(device.role, "receiver")
+        self.assertFalse(device.can_update)
+
+    def test_legacy_version_reply_preserves_authoritative_usb_model(self):
+        node = self.fixture.usb(pid="3109", product="Ultimate Wireless Controller")
+        self.fixture.interface(node)
+        device, = self.scan()
+        # Its trailing bytes resemble an unrelated PID; only the version is
+        # usable. Desktop updater metadata identifies this USB personality.
+        identity = DeviceIdentity(0x3109, 103, target_verified=False)
+        with patch("eightbitdo.discovery.os.access", return_value=True), \
+                patch("eightbitdo.transport.HidrawTransport"), \
+                patch("eightbitdo.protocol.query_identity", return_value=identity):
+            result = inspect_device(device, self.root / "locks")
+        self.assertEqual(result.model_id, "ultimate-bluetooth-receiver")
+        self.assertEqual(result.firmware_version, "1.03")
+        self.assertEqual(result.status, "identified")
+        self.assertEqual(result.role, "receiver")
+        self.assertIsNone(result.firmware_pid)
+        self.assertFalse(result.can_update)
+
     def test_missing_product_name_has_generic_fallback(self):
         self.fixture.usb(product=None)
         device, = self.scan()
