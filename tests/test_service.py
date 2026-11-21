@@ -312,6 +312,30 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(rediscover.call_count, 2)
         self.assertEqual(self.service.get_job(job["id"])["state"], "complete")
 
+    def test_returning_beta_with_target_number_does_not_complete_native_update(self):
+        job = self.native_job()
+        device = Device(job["device_id"], "Receiver", "2dc8", "6013",
+                        usb_path="/sys/devices/fake/1-1", hid_paths=[Path("/dev/fake")])
+        record = FlashQualification(0x6013, None, 0, job["sha256"], "Test fixture only", (105,))
+        identities = iter((DeviceIdentity(0x6013, 105), DeviceIdentity(0x6013, 106, beta=1)))
+        with patch("eightbitdo.service.discover", return_value=[device]), \
+                patch("eightbitdo.connection.discover", return_value=[device]), \
+                patch("eightbitdo.discovery.os.access", return_value=True), \
+                patch("eightbitdo.transport.HidrawTransport", return_value=MagicMock()), \
+                patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
+                patch("eightbitdo.connection.HidrawTransport", return_value=MagicMock()), \
+                patch("eightbitdo.protocol.query_identity", side_effect=lambda *a, **k: next(identities)), \
+                patch("eightbitdo.protocol.query_paired_identity", side_effect=TimeoutError), \
+                patch("eightbitdo.service.query_identity", return_value=DeviceIdentity(0x6013, 105)), \
+                patch("eightbitdo.connection.query_identity", return_value=DeviceIdentity(0x6013, 106, beta=1)), \
+                patch("eightbitdo.service.qualification_for", return_value=record), \
+                patch("eightbitdo.service.flash_application"), \
+                patch("eightbitdo.service.time.monotonic", side_effect=range(0, 200, 5)), \
+                patch("eightbitdo.service.time.sleep"):
+            self.service.run_install(job)
+        self.assertEqual(job["state"], "blocked")
+        self.assertFalse(job["can_install"])
+
     def test_native_worker_is_launched_under_suspend_inhibitor(self):
         job = self.native_job()
         with patch("eightbitdo.service.shutil.which", side_effect=lambda name: "/usr/bin/" + name), \
