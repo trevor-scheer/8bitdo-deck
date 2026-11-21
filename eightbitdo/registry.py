@@ -21,18 +21,20 @@ MODELS = (
     Model("ultimate2-receiver", "Ultimate 2 Wireless receiver", "receiver", 95, 0x6013,
           "Connect the USB receiver to the Deck, directly or through its dock. Turn the paired controller off to inspect the receiver."),
     Model("ultimate-bluetooth-controller", "Ultimate Bluetooth controller (80NA)", "controller", 41, 0x6007,
-          "Check that the model label says 80NA, then connect the controller with a USB data cable. This is different from the 2.4G model."),
+          "Connect the controller with a USB data cable so the app can identify its firmware target. The receiver has separate firmware."),
     Model("ultimate-bluetooth-receiver", "Ultimate Bluetooth receiver (80NA)", "receiver", 42, 0x6008,
-          "Connect the receiver from an 80NA Ultimate Bluetooth controller. A 3109 USB ID alone cannot identify the paired controller variant."),
+          "Connect the receiver directly or through its dock. The app reads its model tag to distinguish it from the 2.4G receiver."),
     Model("ultimate-24g-controller", "Ultimate 2.4G controller (81HA)", "controller", 43, 0x3012,
           "Check the 81HA model label and connect the controller directly by USB. Do not select the Bluetooth model's firmware."),
+    Model("ultimate-24g-receiver", "Ultimate 2.4G receiver (81HA)", "receiver", 44, 0x3013,
+          "Connect the receiver directly or through its dock. Receiver firmware is separate from controller firmware."),
 )
 
 BY_ID = {model.id: model for model in MODELS}
 BY_FIRMWARE_PID = {model.firmware_pid: model for model in MODELS}
-# A runtime USB ID is a candidate, not permission to flash. 3109 is deliberately absent.
-BY_USB_PID = {pid: model for pid, model in BY_FIRMWARE_PID.items()}
-QUERY_PIDS = frozenset({0x3109, 0x310B, 0x6012, 0x6013})
+# Shared USB personalities require a model-tag reply before naming a candidate.
+BY_USB_PID = {pid: model for pid, model in BY_FIRMWARE_PID.items() if pid != 0x6007}
+QUERY_PIDS = frozenset({0x3109, 0x310B, 0x6007, 0x6012, 0x6013})
 
 
 def model_for_identity(pid: int) -> Model | None:

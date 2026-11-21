@@ -27,6 +27,19 @@ Source assets inspected directly:
 
 These assets may change or disappear. Public availability is not an open-source license; no vendor implementation or firmware is copied into this repository.
 
+## Desktop identity decoder
+
+Static analysis of the official desktop updaters resolves the shared legacy USB identities:
+
+- [Windows archive](https://download.8bitdo.com/Tools/FirmwareUpdater/8BitDo_Firmware_Updater_Win.zip), SHA-256 `88fd6af7eb62a33546415db75a40907ef9120d14f10c6cd7a4337ea59994a26f`.
+- [macOS archive](https://download.8bitdo.com/Tools/FirmwareUpdater/8BitDo_Firmware_Updater_macOS.zip), version 2.5.2/build 5, SHA-256 `4f197854e6eca261a77b0a0fc03db60d9f0b860fcb511dadb8484f5d9edea887`.
+
+The Windows methods `DinputHid::getNewGamePadDetails`, `DinputHid::findHIDWithGamePad`, and `Const::.cctor` establish the query bytes and [model-tag decoder](protocol.md#read-only-operations). Native `_ReadHidAdvance@8` (RVA `0x5630`) copies the complete 64-byte input without stripping its report ID. `IDLEJLUltimateReceiver` distinguishes runtime PID `6007` from firmware PID `6008`. The two `IDLEJLUltimate24GReceiver` classes select catalog type 44 and firmware PID `3013`, including the START alias.
+
+The Mac resource `Contents/Resources/S8BitdoDevice.plist` separately lists controller/receiver catalog types 41/42 (Bluetooth) and 43/44 (2.4G). Its `3109` row alone is insufficient to identify a receiver: the Windows decoder confirms that this USB ID is shared. The web bundle's `3013 → type 43` entry conflicts with the desktop receiver mapping. The live type-44 release 1.10 has header PID `3013`, address `3000`, and SHA-256 `5cc0edba1d3dbdff88fe3c9e77bd376891ad8f56fea87cd33f43d20518379086`, supporting the receiver-specific catalog entry.
+
+Only protocol facts were used; proprietary source or binaries are not included in this project and the vendor programs were not executed.
+
 ## Existing Linux work
 
 | Source | Useful evidence | Limit |
@@ -46,13 +59,13 @@ Read-only inspection found SteamOS 3.9.5, fwupd 2.1.7, Chrome installed as a Fla
 
 | USB identity | Reported product | Interpretation |
 | --- | --- | --- |
-| `2dc8:3109` | 8BitDo Ultimate Wireless Controller | First-generation Ultimate identity; exact paired model and component role need confirmation |
-| `2dc8:6013` | 8BitDo Ultimate 2 | Matches the vendor's Ultimate 2 Wireless receiver table entry |
+| `2dc8:3109` | 8BitDo Ultimate Wireless Controller | Model tag `0023` identifies the Ultimate Bluetooth receiver; version 1.03 |
+| `2dc8:6013` | 8BitDo Ultimate 2 | Separate product-ID query identifies Ultimate 2 Wireless receivers; versions 1.06 and 1.01 observed |
 
 `fwupdmgr get-devices --json` did not list either 8BitDo device in its present mode. This is an observation, not proof that every possible bootloader mode is unsupported. `fwupdtool get-plugins --json` could not load its cache without additional permissions; privileges were not elevated.
 
-No vendor HID commands, bootloader transitions, firmware writes, installation changes, or controller configuration changes were performed. Firmware versions remain unknown. The browser updater has not been exercised with these devices. Dock firmware has not been established as a separate target.
+Read-only HID queries and official firmware downloads/header checks passed on the Deck. The identified Bluetooth receiver selected catalog type 42 automatically and its official 1.04 image passed header validation. No bootloader transitions, firmware writes, or controller configuration changes were performed. The browser updater has not been exercised with these devices. Dock firmware has not been established as a separate target.
 
 ## Consequence for the project
 
-Use a shared interface over multiple verified protocol backends. Investigate the web implementation before spending time on desktop binary analysis. Start with exact owned models and their receivers, retain a clear unsupported state, and expand only as device evidence supports it. Supporting all 8BitDo products is an ongoing compatibility effort, not a claim the initial project can make.
+Use a shared interface over multiple verified protocol backends. Start with exact owned models and their receivers, retain a clear unsupported state, and expand only as device evidence supports it. Supporting all 8BitDo products is an ongoing compatibility effort, not a claim the initial project can make.

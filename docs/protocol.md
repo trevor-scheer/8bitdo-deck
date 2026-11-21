@@ -7,6 +7,7 @@ The native backend contains an application-mode update transaction for Ultimate 
 The implementation was independently written from the observable wire format and these sources, inspected on 2026-11-21:
 
 - The official [web updater's connection and update module](https://web.8bitdo.com/assets/connectDevice-CqNxlsyD.js) defines the 28-byte image header, application command framing, CRC algorithm, update sequence, and separate controller/receiver handling.
+- The official [Windows updater](https://download.8bitdo.com/Tools/FirmwareUpdater/8BitDo_Firmware_Updater_Win.zip), statically inspected, defines legacy model discrimination in `DinputHid::getNewGamePadDetails`; see [archive hashes and cross-checks](research.md#desktop-identity-decoder).
 - The official [main module](https://web.8bitdo.com/assets/index-BXAl9J5z.js) defines product/catalog identities and command constants.
 - [Firmware analysis](https://github.com/ascendedent/8bitdo-Linux-Software/blob/main/docs/firmware.md) and [captured identify traffic](https://github.com/ascendedent/8bitdo-Linux-Software/blob/main/docs/capture-log.md) corroborate the identify command, report layout, and distinctions between USB personalities. This repository has no identified license; its implementation code was not copied.
 - [Ultimate 2 configuration protocol](https://github.com/MiguelSanzBr/8bitdo-ultimate2-linux/blob/main/docs/PROTOCOL.md) reports hardware verification of version and paired-controller queries and distinguishes the edition field from a firmware product ID.
@@ -19,7 +20,18 @@ The published vendor code is evidence, not an imported dependency. It does not e
 
 The version is a little-endian 16-bit decimal-hundredths value at byte 2, with beta information at byte 4. Other fields are model-specific: byte 6 can be an edition, not a product ID. A live `6013` reply confirmed version 1.06 with zero at the formerly suspected product-ID position. Fields after the version are **not** reported as hardware revisions. The caller must still choose a HID interface whose report descriptor supports output `81` and input `02`.
 
-The first-generation `3109` identity has additional flags and opaque trailing data. The vendor's legacy byte-offset logic did not produce a credible target on the live device, so only its firmware version is exposed; `target_verified` is false and the product ID remains the ambiguous runtime `3109`. Its version reply was 1.03. No trailing unique data is retained. The shared bootloader PID `3208` is deliberately not an identity-query target in this module.
+The first-generation USB IDs `3109` and `6007` are shared personalities. The desktop updater uses the same zero-padded query above, with the report ID retained in the reply. The version is at raw bytes 2–3, beta is **only byte 4**, and the model tag is at bytes 6–7. Byte 5 contains flags. This backend recognizes:
+
+| USB PID | Little-endian model tag | Firmware PID | Target |
+| --- | --- | --- | --- |
+| `3109` | `0023` | `6008` | Ultimate Bluetooth receiver |
+| `3109` | `3013` or `9023` | `3013` | Ultimate 2.4G receiver |
+| `6007` | `0022` | `6007` | Ultimate Bluetooth controller |
+| `6007` | `0023` | `6008` | Ultimate Bluetooth receiver |
+
+The vendor's `3109` decoder defaults unrecognized tags to the Bluetooth receiver. We require the observed `0023` tag, corroborated by its explicit `6007` receiver branch. We also require a zero high byte for the `6007` tags, which is stricter than the vendor's one-byte test. Unknown tags remain unresolved; they never inherit a firmware target from a USB ID or manual choice. Truncated tags are rejected.
+
+The sanitized live prefix `02 22 67 00 00 80 23 00` identifies the Bluetooth receiver at version 1.03, beta 0. No trailing unique data is retained. The web updater's legacy path uses a different query header and cannot substitute for this desktop decoder. Class-05 command `08` is not sent to these legacy personalities. The shared bootloader PID `3208` remains excluded. Model identification does not qualify a flash operation; native installation remains disabled.
 
 `query_paired_identity` sends `81 04 21 01 00 00 06` with zero padding to a `6013` receiver. A matching class-04 reply provides the paired controller's version, beta, battery percentage, and edition. It provides **no firmware product ID**, so this information is for display and does not qualify the wireless controller for installation. A timeout is reported as no response, without claiming the controller is disconnected.
 

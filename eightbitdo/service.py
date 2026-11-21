@@ -180,7 +180,7 @@ class Service:
         artifact = self.catalog.download(release, self.state_dir / "firmware")
         job.update(state="validating", progress=80, message="Checking firmware size, target header, and version.")
         self.store.save(job)
-        # The catalog version uses decimal hundredths for these five models.
+        # The catalog version uses decimal hundredths for the registered models.
         match = re.fullmatch(r"(\d+)\.(\d{1,2})", release.version)
         if not match:
             raise ValueError("The firmware version format is not supported for this model.")

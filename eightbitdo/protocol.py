@@ -18,7 +18,12 @@ PAYLOAD_SIZE = 46
 BLOCK_SIZE = 4096
 MAX_IMAGE_SIZE = 8 * 1024 * 1024
 MODERN_PIDS = frozenset({0x6012, 0x6013})
-IDENTIFY_PIDS = frozenset({0x3109, 0x310B, 0x6012, 0x6013})
+# Desktop updater model tags, not USB PIDs; see docs/protocol.md.
+LEGACY_TARGETS = {
+    0x3109: {0x0023: 0x6008, 0x3013: 0x3013, 0x9023: 0x3013},
+    0x6007: {0x0022: 0x6007, 0x0023: 0x6008},
+}
+IDENTIFY_PIDS = frozenset({*LEGACY_TARGETS, 0x310B, *MODERN_PIDS})
 HEADER = struct.Struct("<HHHHII")
 FIRMWARE_HEADER = struct.Struct("<7I")
 IDENTIFY_REPORT = bytes.fromhex("81 05 00 21 01").ljust(REPORT_SIZE, b"\0")
@@ -189,10 +194,13 @@ def parse_identity_reply(
     if len(report) < 6 or len(report) > REPORT_SIZE or report[:2] != b"\x02\x22":
         raise ProtocolError("Malformed identity response")
     version, beta = struct.unpack_from("<HH", report, 2)
-    if usb_pid == 0x3109:
-        # Live 3109 data has model-specific flags and opaque trailing fields.
-        # The legacy web parser's offset is not a verified firmware target here.
-        return DeviceIdentity(usb_pid, version, beta, target_verified=False)
+    if usb_pid in LEGACY_TARGETS:
+        if len(report) < 8:
+            raise ProtocolError("Legacy identity response is missing its model tag")
+        tag = int.from_bytes(report[6:8], "little")
+        target = LEGACY_TARGETS[usb_pid].get(tag)
+        # Byte 5 contains flags. Unknown tags must not use the vendor's fallback.
+        return DeviceIdentity(target or usb_pid, version, report[4], target_verified=target is not None)
     if verified_pid not in MODERN_PIDS:
         raise ProtocolError("A separate product-ID reply is required for this device")
     product_id = verified_pid
@@ -230,7 +238,7 @@ def query_identity(
     if not 0 < timeout <= 60:
         raise ProtocolError("Timeout must be between zero and 60 seconds")
     verified_pid = None
-    if usb_pid != 0x3109:
+    if usb_pid not in LEGACY_TARGETS:
         reply = _exchange(transport, 8, length=4, total_length=4, timeout=timeout)
         if len(reply.payload) not in (2, 4):
             raise ProtocolError("Malformed product-ID response")

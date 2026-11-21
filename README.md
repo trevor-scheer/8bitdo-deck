@@ -10,9 +10,9 @@ Follow the [installation guide](docs/install.md) to build the plugin or download
 
 The plugin provides:
 
-- USB discovery and model-specific connection guidance, with separate controller and receiver entries.
+- USB discovery, automatic model selection for identified devices, and separate controller and receiver entries.
 - Firmware version queries for the observed Ultimate Wireless and Ultimate 2 USB personalities. An ambiguous model stays unresolved.
-- Official stable releases for Ultimate 2 controller/receiver, Ultimate Bluetooth controller/receiver, and the original Ultimate 2.4G controller.
+- Official stable releases for Ultimate 2 controller/receiver, Ultimate Bluetooth controller/receiver, and the original Ultimate 2.4G controller/receiver.
 - Bounded HTTPS downloads, exact size and firmware-header checks, local SHA-256 receipts, and explicit provenance limits.
 - Background update jobs, targeted legacy fwupd installation, suspend inhibition during those installs, and post-update version checks.
 - A launcher for the official WebHID updater in Chrome, plus sanitized diagnostic exports.
@@ -23,10 +23,10 @@ The dock is not assumed to be a separate firmware target. Its receiver has its o
 
 | Device or route | Implemented | Hardware validation |
 | --- | --- | --- |
-| Ultimate 2 Wireless receiver, USB `6013` | Identity, version, releases, download/header checks | Read-only checks passed on Steam Deck; receiver reported 1.06 |
+| Ultimate 2 Wireless receiver, USB `6013` | Identity, version, releases, download/header checks | Read-only checks passed on Steam Deck; receivers reported 1.06 and 1.01 |
 | Ultimate 2 Wireless controller | Direct USB and paired status query code, releases, download/header checks | Direct controller connection and native updates still need testing |
-| Original Ultimate Wireless, USB `3109` | Version query; manual model browsing | Reported 1.03; exact variant remains unresolved |
-| Original Ultimate Bluetooth controller/receiver and 2.4G controller | Separate firmware catalog entries and download/header checks | Firmware files checked; native updates not qualified |
+| Ultimate Bluetooth receiver, shared USB `3109` | Automatic model-tag identification, version, matching firmware catalog | Read-only checks passed on Steam Deck; identified receiver at 1.03 and validated official 1.04 download |
+| Original Ultimate Bluetooth controller and 2.4G controller/receiver | Separate firmware catalog entries; legacy model-tag decoder; download/header checks | Firmware files checked; native updates not qualified |
 | Legacy fwupd `ebitdo` devices | Trusted upgrade selection and targeted installation for supported, bootloader-ready devices | Integration tested with simulated responses; no legacy device flashed here |
 | Other 8BitDo products | Unknown devices remain visible; official updater link available | No native support claim |
 
