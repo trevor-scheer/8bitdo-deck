@@ -119,6 +119,18 @@ class ConnectionTests(unittest.TestCase):
             self.assertGreater(constructor.call_count, 1)
             self.assertAlmostEqual(self.clock.now, 0.3)
 
+    def test_boot_open_waits_for_permissions_without_sending_reports(self):
+        self.set_boot()
+        with patch("eightbitdo.connection.BootHidrawTransport") as constructor:
+            transport = constructor.return_value
+            transport.__enter__.side_effect = [PermissionError("ACL not applied yet"), transport]
+            with self.boot() as connection:
+                self.assertIs(connection.transport, transport)
+                transport.send.assert_not_called()
+                transport.receive.assert_not_called()
+            self.assertEqual(constructor.call_count, 2)
+            self.assertAlmostEqual(self.clock.now, 0.1)
+
     def test_descriptor_rejection_cannot_yield_a_boot_connection(self):
         self.set_boot(VENDOR_DESCRIPTOR)
         def open_checked(path, pid, lock, **kwargs):

@@ -6,7 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from eightbitdo.access import RecoveryAccess, RULE_TEXT, _trusted_text, recovery_access_configured
+from eightbitdo.access import (
+    RecoveryAccess, RULE_TEXT, STEAMOS_RULE_LINES, _trusted_text,
+    recovery_access_configured, steamos_recovery_access_available,
+)
 
 
 class RecoveryAccessTests(unittest.TestCase):
@@ -27,6 +30,26 @@ KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinpu
             self.assertTrue(access.status()['configured'])
             self.assertTrue(access.setup()['configured'])
             spawn.assert_not_called()
+
+    def test_local_override_masks_the_distro_policy_even_when_unreadable(self):
+        policy = '\n'.join(STEAMOS_RULE_LINES)
+        for directory in ('/etc', '/run', '/usr/local/lib'):
+            for override in (None, '', '# disabled', 'GOTO="end"\n' + policy):
+                def trusted_text(path):
+                    return policy if str(path).startswith('/usr/lib/') else override
+                with self.subTest(directory=directory, override=override), \
+                        patch('eightbitdo.access.os.path.lexists', side_effect=lambda p: str(p).startswith((directory + '/', '/usr/lib/'))), \
+                        patch('eightbitdo.access._trusted_text', side_effect=trusted_text):
+                    self.assertFalse(steamos_recovery_access_available())
+
+    def test_missing_commented_or_conditional_policy_is_not_accepted(self):
+        policy = '\n'.join(STEAMOS_RULE_LINES)
+        for text in (None, '# ' + policy.replace('\n', '\n# '), 'GOTO="end"\n' + policy,
+                     policy.replace('KERNEL=="hidraw*"', 'KERNEL=="hidraw0"')):
+            with self.subTest(text=text), \
+                    patch('eightbitdo.access.os.path.lexists', return_value=True), \
+                    patch('eightbitdo.access._trusted_text', return_value=text):
+                self.assertFalse(steamos_recovery_access_available())
 
     def test_installer_and_readiness_use_identical_scoped_rules(self):
         script = (Path(__file__).resolve().parent.parent / 'scripts/install-udev-rules.sh').read_text()

@@ -43,8 +43,8 @@ def _lock_path(original: Device, lock_dir: Path) -> Path:
 def require_boot_access(original: Device) -> None:
     """Call before requesting any mode change; this never installs permission rules.
 
-    The root-owned setup receipt establishes that the scoped boot rules were
-    installed and reloaded. Actual boot-node access is checked again on open.
+    Accept the reviewed SteamOS policy or completed scoped-rule setup. Actual
+    boot-node access is checked again on open after waiting for enumeration.
     """
     _original_port(original)
     if not recovery_access_configured():
