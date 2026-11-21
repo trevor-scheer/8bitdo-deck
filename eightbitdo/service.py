@@ -175,7 +175,7 @@ class Service:
         with self.store.lock(job_id):
             job = self.store.read(job_id)
             if job["state"] != "ready" or not job["can_install"] or job.get("backend") not in {"fwupd", "hid"}:
-                raise ValueError("This firmware is not qualified for installation. Use the official updater for this model.")
+                raise ValueError("This firmware is not qualified for installation. No firmware was written.")
             job.update(state="queued", can_install=False, progress=0, message="Starting the confirmed update. Keep the device connected.")
             self._spawn(job, "install")
             return public_job(job)
@@ -214,7 +214,7 @@ class Service:
         job.update(
             state="blocked", progress=100, can_install=False, backend="hid",
             version=image.version, sha256=artifact.sha256, artifact_path=artifact.path,
-            message="Firmware downloaded; model and version headers match. Native installation is awaiting hardware qualification. " + artifact.verification_note + " Use Open official updater to update this model.",
+            message="Firmware downloaded; model and version headers match. Native installation is awaiting hardware qualification. " + artifact.verification_note + " Firmware on the device is unchanged.",
         )
         if job["device_id"]:
             device = self._native_device(job["device_id"], model.id)

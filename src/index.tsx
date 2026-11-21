@@ -279,7 +279,7 @@ function Content() {
     </PanelSection>}
 
     <PanelSection title="Other update options">
-      <p style={textStyle}>For devices without a verified native update path, use 8BitDo’s official web updater. USB access may need setup in Desktop Mode.</p>
+      <p style={textStyle}>8BitDo’s web updater supports some models, but currently has no update path for the Ultimate Bluetooth receiver. USB access may need setup in Desktop Mode.</p>
       <PanelSectionRow>
         <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {
           const result = await openOfficialUpdater();
