@@ -107,7 +107,7 @@ eightbitdo recovery-access
 eightbitdo setup-recovery-access --confirm
 ```
 
-The first command only checks access configuration. The second requests administrator authorization for the scoped permission setup; it does not flash firmware. Inspect its returned status and run `recovery-access` again to check whether setup completed.
+The first command only checks access configuration. The second requests administrator authorization for the scoped permission setup and waits up to five minutes for completion; it does not flash firmware. Keep the command running and approve the system prompt. It exits successfully only when access is configured. Denial, timeout, or Ctrl+C returns an error. A timeout or Ctrl+C stops waiting without cancelling the authorization process, so dismiss any remaining prompt before retrying setup. You can run `recovery-access` later to check the installed configuration.
 
 ## Prepare and install firmware
 

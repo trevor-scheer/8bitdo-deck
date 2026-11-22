@@ -67,6 +67,8 @@ Replace `JOB_ID` with a job ID returned by preparation. `--params` must contain 
 
 Exit status is `0` for a successful operation, `1` for an API failure or a failed job result, and `2` for CLI usage errors. A queued or ready job is not a successful firmware installation; poll the job and inspect its state.
 
+Both `setup-recovery-access --confirm` and `api setup_recovery_access` wait up to five minutes for administrator authorization. They report success only after recovery access is configured. Denial or incomplete setup returns `operation_failed`; the `api` command preserves the versioned error envelope. A timeout returns `timeout`, and Ctrl+C returns `operation_failed`. These failures exit with status `1`. Stopping the wait does not cancel the authorization process; dismiss any remaining prompt before retrying setup.
+
 ## Operations
 
 Call `info` for the supported API/application versions, platform support, and operation parameter descriptions. It does not create an update service or probe hardware. `--help` and `--version` likewise do not start a service or access devices.
@@ -89,6 +91,8 @@ Call `info` for the supported API/application versions, platform support, and op
 | `open_official_updater` | None | Asks the host browser integration to open the official website. |
 
 An operation name cannot select a private service method or invoke a worker directly. Unknown parameters, wrong types, and unsupported API versions are rejected before the operation runs. Installation and recovery confirmations are boolean parameters, not strings or truthy integers.
+
+In the Python API and Decky adapter, `setup_recovery_access` returns immediately. Keep the same API instance alive and poll `get_recovery_access` while `pending` is true. Pending status and authorization errors belong to that instance; a separate process can inspect installed access configuration but cannot track another process's setup prompt. The CLI performs this polling before it exits.
 
 ## Frontend responsibilities
 

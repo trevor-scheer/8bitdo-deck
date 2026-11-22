@@ -142,6 +142,7 @@ class FrontendBoundaryTests(unittest.TestCase):
         for args, code in [
             (['api', 'scan_devices', '--api-version', '2'], 'unsupported_api_version'),
             (['api', 'install_update', '--params', '{"job_id":"fixture"}'], 'confirmation_required'),
+            (['api', 'setup_recovery_access', '--params', '{"confirmed":false}'], 'confirmation_required'),
             (['api', 'scan_devices', '--params', '{'], 'invalid_parameters'),
             (['api', 'scan_devices', '--params', '[]'], 'invalid_parameters'),
             (['api', 'scan_devices', '--params', 'null'], 'invalid_parameters'),
@@ -169,14 +170,14 @@ class FrontendBoundaryTests(unittest.TestCase):
 
     def test_cli_permission_setup_needs_confirmation_and_then_calls_shared_api(self):
         service = Mock()
-        service.setup_recovery_access.return_value = {'pending': True}
+        service.setup_recovery_access.return_value = {'configured': True, 'pending': False}
         with self.assertRaises(SystemExit) as caught:
             self.cli(['setup-recovery-access'], UpdaterAPI(service=service))
         self.assertEqual(caught.exception.code, 2)
         service.setup_recovery_access.assert_not_called()
         status, output, _ = self.cli(['setup-recovery-access', '--confirm'], UpdaterAPI(service=service))
         self.assertEqual(status, 0)
-        self.assertEqual(json.loads(output), {'pending': True})
+        self.assertEqual(json.loads(output), {'configured': True, 'pending': False})
         service.setup_recovery_access.assert_called_once_with()
 
     def test_hidden_worker_dispatch_does_not_construct_public_api(self):

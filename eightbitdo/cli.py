@@ -1,10 +1,36 @@
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from . import __version__
 from .api import API_VERSION, UpdaterAPI
+
+
+_SETUP_WAIT_SECONDS = 300
+
+
+def _request(client, operation, parameters, *, api_version=API_VERSION):
+    if operation != "setup_recovery_access":
+        return client.request(operation, parameters, api_version=api_version)
+    try:
+        response = client.request(operation, parameters, api_version=api_version)
+        deadline = time.monotonic() + _SETUP_WAIT_SECONDS
+        while response["ok"] and response["result"].get("pending"):
+            if time.monotonic() >= deadline:
+                return _setup_error("timeout", "Timed out waiting for administrator authorization. The authorization prompt may still be open; dismiss it before retrying setup.")
+            time.sleep(0.25)
+            response = client.request("get_recovery_access", api_version=api_version)
+        if response["ok"] and not response["result"].get("configured"):
+            return _setup_error("operation_failed", response["result"].get("message") or "Recovery USB access was not configured.")
+        return response
+    except KeyboardInterrupt:
+        return _setup_error("operation_failed", "Stopped waiting for administrator authorization. Setup may still be running; dismiss any authorization prompt before retrying setup.")
+
+
+def _setup_error(code, message):
+    return {"api_version": API_VERSION, "ok": False, "error": {"code": code, "message": message}}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -63,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             response = {"api_version": API_VERSION, "ok": False,
                         "error": {"code": "invalid_parameters", "message": "Parameters must be a valid JSON object."}}
         else:
-            response = client.request(args.operation, parameters, api_version=args.api_version)
+            response = _request(client, args.operation, parameters, api_version=args.api_version)
         print(json.dumps(response, indent=2))
         return int(not response["ok"] or _failed_job(response.get("result")))
 
@@ -88,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
             parameters["confirmed"] = True
     else:
         operation, parameters = operations[args.command]
-    response = client.request(operation, parameters)
+    response = _request(client, operation, parameters)
     if not response["ok"]:
         print(json.dumps({"error": response["error"]["message"]}), file=sys.stderr)
         return 1
