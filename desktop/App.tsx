@@ -829,7 +829,7 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
                       <strong>
                         {appUpdate.state === "recovered"
                           ? "Reopen the application to use the restored version."
-                          : "Quit the app to finish installing the update."}
+                          : "Quit the app to finish applying this change."}
                       </strong>
                       <div className="button-row">
                         <button
