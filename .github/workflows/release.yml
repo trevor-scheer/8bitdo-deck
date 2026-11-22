@@ -96,6 +96,12 @@ jobs:
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes --title "8BitDo Updater $RELEASE_TAG"
           fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest
+          fi
       - name: Publish metadata after immutable release downloads are available
         working-directory: update-metadata
         run: |
@@ -104,9 +110,3 @@ jobs:
           git add -- '*/metadata/*.json'
           git commit -m 'publish signed application update metadata'
           git push origin HEAD:updates
-          gh release upload "$RELEASE_TAG" release-assets/* --clobber
-          if [[ "$RELEASE_TAG" == *-* ]]; then
-            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
-          else
-            gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest
-          fi

@@ -1,4 +1,6 @@
 include requirements-build.txt
+include package.json
+include src-tauri/Cargo.toml src-tauri/tauri.conf.json
 recursive-include packaging *.py *.spec *.md
-recursive-include scripts smoke_distributions.py check_version.py
+recursive-include scripts *.py
 recursive-include docs *.md
