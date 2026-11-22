@@ -7,6 +7,8 @@ async function mockBackend(
     recovery?: boolean;
     slowScan?: boolean;
     appInterrupted?: boolean;
+    activeInstall?: boolean;
+    failOperation?: string;
   } = {},
 ) {
   await page.addInitScript((options) => {
@@ -52,6 +54,8 @@ async function mockBackend(
       models,
       jobs: {} as Record<string, Record<string, unknown>>,
       failScan: false,
+      failedJobReads: 0,
+      jobReadTimes: [] as number[],
       releaseScan: null as (() => void) | null,
     };
     const scope = window as unknown as {
@@ -69,6 +73,8 @@ async function mockBackend(
         if (command === "quit_application") return;
         const { operation, parameters } = request;
         fixture.calls.push({ operation, parameters });
+        if (operation === options.failOperation)
+          throw new Error("Confirmed operation was rejected.");
         let result: unknown;
         switch (operation) {
           case "info":
@@ -133,14 +139,21 @@ async function mockBackend(
             result = { job_id: "job1" };
             break;
           case "get_job":
+            fixture.jobReadTimes.push(Date.now());
+            if (fixture.failedJobReads > 0) {
+              fixture.failedJobReads--;
+              throw new Error("Temporary progress connection failure");
+            }
             result = fixture.jobs.job1;
             break;
           case "install_update":
             fixture.jobs.job1 = {
               ...fixture.jobs.job1,
-              state: "complete",
+              state: options.activeInstall ? "installing" : "complete",
               can_install: false,
-              message: "Receiver firmware verified.",
+              message: options.activeInstall
+                ? "Receiver update is running."
+                : "Receiver firmware verified.",
             };
             result = fixture.jobs.job1;
             break;
@@ -423,3 +436,147 @@ test("interrupted application rollback needs explicit confirmation", async ({
   });
   await expect(page.getByText("Previous application restored.")).toBeVisible();
 });
+
+async function startActiveInstall(page: Page) {
+  await mockBackend(page, { activeInstall: true });
+  await page.goto("/");
+  await receiver(page);
+  await page.getByRole("button", { name: "Prepare firmware" }).click();
+  await page.getByRole("button", { name: "Review installation" }).click();
+  await page
+    .getByRole("button", { name: "Confirm firmware installation" })
+    .click();
+  await expect(page.getByText("Receiver update is running.")).toBeVisible();
+}
+
+async function failJobReads(page: Page, count: number) {
+  await page.evaluate((count) => {
+    const fixture = (
+      window as unknown as {
+        __fixture: { failedJobReads: number; jobReadTimes: number[] };
+      }
+    ).__fixture;
+    fixture.failedJobReads = count;
+    fixture.jobReadTimes = [];
+  }, count);
+}
+
+async function completeJob(page: Page) {
+  await page.evaluate(() => {
+    const fixture = (
+      window as unknown as {
+        __fixture: {
+          failedJobReads: number;
+          jobs: Record<string, Record<string, unknown>>;
+        };
+      }
+    ).__fixture;
+    fixture.failedJobReads = 0;
+    fixture.jobs.job1 = {
+      ...fixture.jobs.job1,
+      state: "complete",
+      message: "Receiver firmware verified.",
+    };
+  });
+}
+
+test("transient progress errors retry without unlocking active firmware actions", async ({
+  page,
+}) => {
+  await startActiveInstall(page);
+  await failJobReads(page, 1);
+  await expect(page.getByRole("alert")).toContainText(
+    "Temporary progress connection failure",
+  );
+  await expect(
+    page.getByRole("button", { name: "Scan devices" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Prepare firmware" }),
+  ).toBeDisabled();
+  await completeJob(page);
+  await expect(page.getByText("Receiver firmware verified.")).toBeVisible({
+    timeout: 6000,
+  });
+  await expect(
+    page.getByRole("button", { name: "Scan devices" }),
+  ).toBeEnabled();
+  const reads = await page.evaluate(
+    () =>
+      (window as unknown as { __fixture: { jobReadTimes: number[] } }).__fixture
+        .jobReadTimes,
+  );
+  expect(reads[1] - reads[0]).toBeGreaterThanOrEqual(900);
+  expect(await calls(page, "install_update")).toHaveLength(1);
+});
+
+test("persistent progress errors stop automatic retries and allow a read-only status retry", async ({
+  page,
+}) => {
+  await startActiveInstall(page);
+  await failJobReads(page, 100);
+  await expect(page.getByRole("alert")).toContainText(
+    "Automatic retries stopped",
+    { timeout: 20000 },
+  );
+  const before = (await calls(page, "get_job")).length;
+  await page.waitForTimeout(1200);
+  expect((await calls(page, "get_job")).length).toBe(before);
+  await expect(
+    page.getByRole("button", { name: "Scan devices" }),
+  ).toBeDisabled();
+  await completeJob(page);
+  await page.getByRole("button", { name: "Retry status" }).click();
+  await expect(page.getByText("Receiver firmware verified.")).toBeVisible();
+  expect(await calls(page, "install_update")).toHaveLength(1);
+});
+
+for (const operation of [
+  "install_update",
+  "apply_app_update",
+  "recover_app_update",
+]) {
+  test(`a rejected ${operation} confirmation closes the dialog and exposes its error`, async ({
+    page,
+  }) => {
+    await mockBackend(page, {
+      failOperation: operation,
+      appInterrupted: operation === "recover_app_update",
+    });
+    await page.goto("/");
+    if (operation === "install_update") {
+      await receiver(page);
+      await page.getByRole("button", { name: "Prepare firmware" }).click();
+      await page.getByRole("button", { name: "Review installation" }).click();
+      await page
+        .getByRole("button", { name: "Confirm firmware installation" })
+        .click();
+    } else {
+      await page.getByRole("button", { name: "App settings" }).click();
+      await page.getByRole("button", { name: "Check for app updates" }).click();
+      await page
+        .getByRole("button", {
+          name:
+            operation === "apply_app_update"
+              ? "Review app update"
+              : "Review app update rollback",
+          exact: true,
+        })
+        .click();
+      await page
+        .getByRole("button", {
+          name:
+            operation === "apply_app_update"
+              ? "Confirm app update"
+              : "Confirm app rollback",
+          exact: true,
+        })
+        .click();
+    }
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(page.getByRole("alert")).toContainText(
+      "Confirmed operation was rejected.",
+    );
+    expect(await calls(page, operation)).toHaveLength(1);
+  });
+}
