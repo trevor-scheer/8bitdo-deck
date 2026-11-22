@@ -1,6 +1,6 @@
 # Wireless firmware update investigation
 
-Investigated on 2026-11-21. **The Ultimate 2 Wireless controller has a real update channel through its USB receiver.** A read-only firmware identity query and application-memory read succeeded over that channel on Steam Deck. A separate direct USB receiver checksum query also succeeded. Receiver 1.01 also completed a bounded recovery round trip with production helpers: boot identity and source inspection, one reset, and return to unchanged firmware on the same USB port. Pending-image copy, power-loss recovery, and actual firmware installation remain untested. No firmware image erase, write, or commit was sent. The experimental Ultimate 2 direct-USB receiver update permits stable 1.01 → exact official 1.06 after matching source fingerprints. A separate [original Bluetooth receiver](legacy-receiver-protocol.md) authorization permits 1.03 → exact official 1.04 with different compatibility checks. Controller and wireless writes remain blocked; no native update is hardware-qualified.
+Investigated on 2026-11-21; static review extended on 2026-11-22. **The Ultimate 2 Wireless controller has a real update channel through its USB receiver.** A read-only firmware identity query and application-memory read succeeded over that channel on Steam Deck. A separate direct USB receiver checksum query also succeeded. Receiver 1.01 also completed a bounded recovery round trip with production helpers: boot identity and source inspection, one reset, and return to unchanged firmware on the same USB port. Pending-image copy, power-loss recovery, and actual firmware installation remain untested. No firmware image erase, write, or commit was sent. The experimental Ultimate 2 direct-USB receiver update permits stable 1.01 → exact official 1.06 after matching source fingerprints. A separate [original Bluetooth receiver](legacy-receiver-protocol.md) authorization permits 1.03 → exact official 1.04 with different compatibility checks. The controller transaction is source-reviewed for stable 1.09 → exact 1.10 through receiver 1.06. Controller USB recovery and a complete wireless installation still need hardware validation; no native update is hardware-qualified. See the [controller evidence and exact source scope](devices/ultimate2-wireless.md).
 
 ## Live results
 
@@ -28,7 +28,7 @@ The discovery fix uses the verified internal receiver identity to request paired
 python3 -m eightbitdo probe-wireless
 ```
 
-This command automatically finds candidate receivers, rechecks their identity, and only sends the radio PID query for stable receiver 1.06 paired with stable controller 1.10. Other versions return an explanatory unsupported result. It does not expose general-purpose firmware memory reads, change mode, initialize an update, or make an installation eligible.
+This command automatically finds candidate receivers, rechecks their identity, and only sends the radio PID query for stable receiver 1.06 paired with stable controller 1.09 or 1.10. Other versions return an explanatory unsupported result. It does not expose general-purpose firmware memory reads, change mode, initialize an update, or make an installation eligible.
 
 The radio request is the existing class-05 product-ID request with its class changed to `06`, padded to 64 bytes including report ID:
 
@@ -54,6 +54,18 @@ Native `setWirelessupdate` (VA `0x1042d5f0`) sets a flag read by the packet buil
 
 The vendor's Ultimate 2 transfer branch starts erase/write/CRC offsets at zero and reads payload bytes after the 28-byte DAT header. It uses 4,096-byte blocks and at most 46 bytes per write. Native initialization at VA `0x10424170` sends `C1` with parameters, length, total length, and offset all zero. Commit at VA `0x1042c9d0` sends `C4` with length and total length 8, offset 0, and payload length/version as two little-endian 32-bit values, followed by command `07` to reset. The native backend now matches these fields. These facts establish intent and addressing, not successful installation by this project.
 
+## Radio initialization and idle recovery
+
+Controller 1.10's `C1` handler at payload offset `0xb664` constructs a 16-byte geometry response. Its radio branch at `0xb6b4` sends only `request.length + 17` bytes through the RF queue at `0x143c`. The official request has length zero, so only the class byte and 16-byte header reach the receiver. A radio initializer must require a successful `C1` acknowledgment with zero length, CRC, total length, and offset. It must not interpret HID padding as geometry. Exact installed-code fingerprints establish the reviewed logical base zero and 4096-byte block size.
+
+`C1` is not a read-only probe. It calls flash initialization at `0x9690`, reads the JEDEC ID, and, for recognized flash parts, reads and writes the flash status register to clear protection bits `0x1c`. This path does not erase or program application data. Send it only as part of an authorized transfer, after source, image, metadata, target, and battery checks.
+
+The reviewed updater dispatcher has no `C0` handshake handler. The official native `C1` caller waits for a matching class-05 `C1` response. Its generic packet routine retries sends; this project must stop on an uncertain destructive-command result rather than copy that retry behavior.
+
+Other response lengths remain command-specific. Radio `C3` sends 29 bytes before the receiver adds the input report ID: class, header, six checksum bytes, and six padding bytes. Erase, write, commit, and reset acknowledgments contain no meaningful payload. Their echoed length fields must still match the request.
+
+Receiver 1.06 sets its RF-update flag for write `03` and checksum `C3`. Every class-06 request clears an idle counter. The main loop at `0x2d7a` clears the flag after 20 intervals without another request; each interval requires more than `0xf42400` hardware timer ticks. A link-connect path at `0x948` also clears it. The exact wall-clock duration has not been measured. This RAM state has a timeout, but neither a timeout nor a successful identity query proves that an interrupted controller image was committed safely.
+
 ## Firmware routing and staging
 
 The reviewed official images are:
@@ -74,7 +86,7 @@ Write, erase, and CRC commands add a model-specific staging base to their logica
 
 Readback uses `staging_base + logical_write_offset`, without adding the DAT image address `0x5000`. Tests cover both targets across multiple blocks.
 
-The native backend follows the reviewed verification framing. Firmware `C3` handlers return six bytes—CRC16 plus a 32-bit additive checksum—while echoing the request's length field of 12. They also echo its CRC, total length, and offset. The parser now separates declared length from actual payload size and validates the echoed fields. `C1` likewise returns 16 bytes while echoing a length of 0; write, erase, and commit acknowledgments carry no payload despite their echoed lengths.
+The native backend follows the reviewed verification framing. Firmware `C3` handlers return six bytes—CRC16 plus a 32-bit additive checksum—while echoing the request's length field of 12. They also echo its CRC, total length, and offset. The parser now separates declared length from actual payload size and validates the echoed fields. Direct USB `C1` returns 16 bytes while echoing a length of 0; radio `C1` returns only its header, as described below; write, erase, and commit acknowledgments carry no payload despite their echoed lengths.
 
 For blocks of at most 4096 bytes, the firmware checks `floor(length / 128) * 128` bytes. The backend compares both checksums over that prefix and verifies all bytes, including the tail, by absolute readback. After all writes, the backend repeats checksum and complete readback verification across every block before commit. Preflight checks the embedded product ID, conservative model-specific bounds, and existing metadata; damaged metadata or a pending staged update blocks initialization. Experimental `SourceReviewedAuthorization` records also require complete bootloader and installed-application fingerprints, checked during preparation and again before updating. See the [native protocol contract](protocol.md#application-update-protocol).
 
@@ -93,7 +105,7 @@ Private inspection of the live controller's bootloader established several recov
 
 The 1.10 payload fits between the installed base and the metadata/staging regions. A larger image must not inherit that assumption: image hash, length, and safe geometry belong in its qualification record. ROM flash primitives lie outside the read bootloader region, so their electrical failure behavior was not established.
 
-These findings describe mechanisms for retrying an interrupted copy; they do not demonstrate power-loss safety. No power-loss test, firmware write, rollback, or completed USB rescue was performed. Both controllers already run the latest stable 1.10 release available from the inspected catalog. Reflashing them was unnecessary for confirming the radio path.
+These findings describe mechanisms for retrying an interrupted copy; they do not demonstrate power-loss safety. No power-loss test, firmware write, rollback, or completed USB rescue was performed. Both controllers were observed running stable 1.10. The official catalog checked on 2026-11-22 lists stable 1.10 and 1.09, so neither controller needs an upgrade. Reflashing them was unnecessary for confirming the radio path.
 
 The separate [Ultimate 2 receiver recovery helper](receiver-recovery.md) checks boot identity, reviewed bootloader bytes, metadata, and installed or staged firmware before allowing one reset. Reset can cause the vendor bootloader to install a pending image; it is not universally read-only. Its simulated tests establish host gating, not hardware recovery.
 
@@ -109,6 +121,6 @@ For the original Ultimate Bluetooth 80NA, the [official legacy Android APK](http
 
 ## Validation still required
 
-Source-reviewed experimental authorization and hardware qualification are separate evidence levels. Two direct-USB receiver authorizations are enabled: Ultimate 2 1.01 → 1.06 and original Bluetooth 1.03 → 1.04. Hardware qualifications remain empty. The legacy record checks its packaged boot prefix and live geometry; it does not fingerprint installed boot bytes. Its bounded boot round trip and one application-page CRC passed, but first installation, recovery reflash, and power-loss recovery remain untested. The completed receiver round trip establishes return to an unchanged source image, not pending-image activation or interrupted-update recovery. Wireless installation additionally needs its own reviewed transport and recovery path, full radio transfer, error handling, commit, reconnect identity, and normal controller-operation checks. A successful direct receiver query does not establish those behaviors.
+Source-reviewed experimental authorization and hardware qualification are separate evidence levels. Two direct-USB receiver authorizations are enabled: Ultimate 2 1.01 → 1.06 and original Bluetooth 1.03 → 1.04. Hardware qualifications remain empty. The legacy record checks its packaged boot prefix and live geometry; it does not fingerprint installed boot bytes. Its bounded boot round trip and one application-page CRC passed, but first installation, recovery reflash, and power-loss recovery remain untested. The completed receiver round trip establishes return to an unchanged source image, not pending-image activation or interrupted-update recovery. The radio transport, initialization, checksums, staging, and commit are statically reviewed for the exact sources in the [controller evidence](devices/ultimate2-wireless.md). Hardware validation still needs a controller USB recovery round trip, complete wireless transfer and activation, reconnect identity, and normal controller-operation checks. A successful boot round trip alone cannot establish recovery from an interrupted installation. A successful direct receiver query does not establish those behaviors.
 
 Keep receiver and controller firmware separate, and do not extend results to another receiver version or controller family without evidence. An experimental update must remain labeled as such until hardware evidence supports a `FlashQualification`.
