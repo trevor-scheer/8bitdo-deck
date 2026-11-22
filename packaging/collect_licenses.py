@@ -38,9 +38,10 @@ def main():
             # Homebrew's Python dependencies retain notices in their keg root.
             for parent in path.parents:
                 if (parent / "INSTALL_RECEIPT.json").is_file():
+                    package_name = parent.name if parent.parent.name == "opt" else parent.parent.name
                     for notice in parent.iterdir():
                         if notice.is_file() and notice.name.lower().startswith(("license", "copying", "notice")):
-                            shutil.copyfile(notice, destination / (parent.parent.name + "-" + notice.name))
+                            shutil.copyfile(notice, destination / (package_name + "-" + notice.name))
                     break
             continue
         if not source.startswith(("/usr/lib/", "/lib/")):

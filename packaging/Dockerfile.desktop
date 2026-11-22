@@ -6,5 +6,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libayatana-appindicator3-dev patchelf xvfb xauth \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=node /usr/local/ /usr/local/
-RUN corepack enable
+RUN corepack enable pnpm
 WORKDIR /workspace

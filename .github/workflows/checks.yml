@@ -66,11 +66,11 @@ jobs:
           - runner: macos-15
             platform: macos
             arch: aarch64
-            bundles: dmg
+            bundles: app,dmg
           - runner: macos-15-intel
             platform: macos
             arch: x86_64
-            bundles: dmg
+            bundles: app,dmg
           - runner: windows-2022
             platform: windows
             arch: x86_64
@@ -124,7 +124,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: '11.0'
         run: pnpm exec tauri build --bundles ${{ matrix.bundles }}
       - name: Test desktop command boundary
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+        run: cargo test --release --locked --manifest-path src-tauri/Cargo.toml
       - name: Package native installers and app-update inputs
         run: python scripts/package_distributions.py desktop
       - name: Smoke-test packaged desktop bridge

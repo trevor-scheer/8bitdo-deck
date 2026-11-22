@@ -1,6 +1,7 @@
 """Assemble native distribution files and app units for signed tufup publication."""
 
 import argparse
+import json
 from pathlib import Path
 import platform
 import shutil
@@ -39,6 +40,28 @@ def archive_directory(directory, destination, *, zip_format=False):
 
 def prepare():
     subprocess.run([sys.executable, str(ROOT / "packaging/collect_licenses.py"), str(ROOT / "out/licenses")], check=True)
+    metadata = json.loads(subprocess.check_output([
+        "cargo", "metadata", "--locked", "--format-version", "1",
+        "--manifest-path", str(ROOT / "src-tauri/Cargo.toml"),
+    ], text=True))
+    for package in metadata["packages"]:
+        if package.get("source") is None:
+            continue
+        directory = Path(package["manifest_path"]).parent
+        for notice in directory.iterdir():
+            if notice.is_file() and notice.name.lower().startswith(("license", "copying", "notice")):
+                target = ROOT / "out/licenses" / (package["name"] + "-" + package["version"])
+                target.mkdir(exist_ok=True)
+                shutil.copy2(notice, target / notice.name)
+    for package in ("react", "react-dom", "@tauri-apps/api"):
+        directory = ROOT / "node_modules" / package
+        for notice in directory.iterdir():
+            if notice.is_file() and notice.name.lower().startswith(("license", "copying", "notice")):
+                target = ROOT / "out/licenses" / package.replace("/", "-")
+                target.mkdir(exist_ok=True)
+                shutil.copy2(notice, target / notice.name)
+    for notice in (ROOT / "node_modules/.pnpm").glob("scheduler@*/node_modules/scheduler/LICENSE"):
+        shutil.copy2(notice, ROOT / "out/licenses/React-scheduler-LICENSE")
     host = next(line.split(": ", 1)[1] for line in subprocess.check_output(["rustc", "-vV"], text=True).splitlines() if line.startswith("host: "))
     executable = ROOT / "out/binary" / ("eightbitdo" + SUFFIX)
     sidecar = ROOT / "src-tauri/binaries" / (f"eightbitdo-{host}" + SUFFIX)
