@@ -1,18 +1,23 @@
-import fcntl
 import json
 import os
 import re
 import tempfile
 import time
+import sys
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+
+from .locking import exclusive_lock
 
 
 ACTIVE_STATES = {"queued", "downloading", "validating", "installing", "verifying"}
 
 
 def default_state_dir() -> Path:
+    if sys.platform in {"darwin", "win32"}:
+        from platformdirs import user_state_path
+        return user_state_path("8BitDo Updater", appauthor=False)
     return Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "eightbitdo-deck"
 
 
@@ -45,7 +50,17 @@ class JobStore:
                 json.dump(job, stream, sort_keys=True)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, destination)
+            # Windows readers/virus scanners can briefly hold a handle without
+            # delete sharing. Retain atomic replacement, with a bounded retry.
+            deadline = time.monotonic() + 1.0
+            while True:
+                try:
+                    os.replace(temporary, destination)
+                    break
+                except PermissionError:
+                    if sys.platform != "win32" or time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.01)
         finally:
             Path(temporary).unlink(missing_ok=True)
 
@@ -64,15 +79,8 @@ class JobStore:
             raise ValueError("Invalid lock key.")
         directory = self.root / "locks"
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = os.open(directory / (key + ".lock"), os.O_CREAT | os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
-        try:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise RuntimeError("Another operation is already using this device or job.") from None
+        with exclusive_lock(directory / (key + ".lock")):
             yield
-        finally:
-            os.close(fd)
 
 
 def public_job(job: dict) -> dict:

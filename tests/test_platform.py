@@ -1,3 +1,4 @@
+import sys
 import os
 from pathlib import Path
 import tempfile
@@ -9,6 +10,7 @@ from eightbitdo.runtime import external_environment, frozen_application
 from eightbitdo.service import Service
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux host integration")
 class LinuxPlatformTests(unittest.TestCase):
     def setUp(self):
         self.platform = LinuxPlatform()

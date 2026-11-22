@@ -74,7 +74,7 @@ class Device:
     status: str = "detected"
     can_update: bool = False
     reason: str = "Identify the exact model before choosing firmware."
-    hid_paths: list[Path] = field(default_factory=list, repr=False)
+    hid_paths: list[Path | bytes] = field(default_factory=list, repr=False)
     backend: str = "hid"
     firmware_pid: int | None = None
     hardware_revision: int | None = None
@@ -126,9 +126,11 @@ def discover(sys_root: Path = Path("/sys"), dev_root: Path = Path("/dev")) -> li
     return list(devices.values())
 
 
-def inspect_device(device: Device, lock_dir: Path) -> Device:
+def inspect_device(device: Device, lock_dir: Path, *, transport_factory=None, check_permissions=True) -> Device:
     from .protocol import query_identity, query_paired_identity
     from .transport import HidrawTransport
+
+    transport_factory = transport_factory or HidrawTransport
 
     pid = int(device.pid, 16)
     if pid not in QUERY_PIDS:
@@ -139,11 +141,11 @@ def inspect_device(device: Device, lock_dir: Path) -> Device:
         return device
     errors = []
     for path in device.hid_paths:
-        if not os.access(path, os.R_OK | os.W_OK):
+        if check_permissions and not os.access(path, os.R_OK | os.W_OK):
             errors.append("USB access denied. Use the official updater's Linux setup or a narrowly scoped HID permission rule.")
             continue
         try:
-            with HidrawTransport(path, pid, lock_dir / (device.id + ".lock"), expected_usb_path=device.usb_path or None) as transport:
+            with transport_factory(path, pid, lock_dir / (device.id + ".lock"), expected_usb_path=device.usb_path or None) as transport:
                 identity = query_identity(transport, usb_pid=pid)
                 if identity.product_id == 0x6013 and identity.target_verified:
                     try:

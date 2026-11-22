@@ -1,4 +1,4 @@
-"""Linux integration boundary for the shared updater service.
+"""Host integration boundary for the shared updater service.
 
 Protocol transactions and write authorization remain in the service/backends.
 This adapter owns device access, worker execution, and desktop integration.
@@ -30,40 +30,25 @@ class WorkerLaunch:
 
 
 def process_start(pid: int) -> str:
+    if sys.platform in {"darwin", "win32"}:
+        import psutil
+        try:
+            return str(psutil.Process(pid).create_time())
+        except psutil.Error as error:
+            raise OSError("The worker process is unavailable.") from error
     # comm can contain spaces/parentheses; fields after its final ')' start at 3.
     return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
 
 
-class LinuxPlatform:
-    """Concrete host services; inject another adapter into Service when porting."""
+class Platform:
+    """Worker lifecycle shared by host adapters."""
 
-    def __init__(self):
-        if not sys.platform.startswith("linux"):
-            raise RuntimeError("8BitDo Updater currently supports Linux hosts only.")
+    native_write = False
 
-    def discover(self):
-        return discover()
-
-    def inspect_device(self, device, lock_dir):
-        return inspect_device(device, lock_dir)
-
-    def open_hid(self, *args, **kwargs):
-        return HidrawTransport(*args, **kwargs)
-
-    def require_boot_access(self, device):
-        return require_boot_access(device)
-
-    def wait_for_boot(self, *args, **kwargs):
-        return wait_for_boot(*args, **kwargs)
-
-    def wait_for_application(self, *args, **kwargs):
-        return wait_for_application(*args, **kwargs)
-
-    def recovery_access(self, state_dir):
-        return RecoveryAccess(state_dir)
-
-    def firmware_service(self):
-        return Fwupd()
+    def require_write_support(self):
+        if not self.native_write:
+            from .hidapi_backend import WRITE_UNAVAILABLE
+            raise RuntimeError(WRITE_UNAVAILABLE)
 
     def worker_running(self, pid, started) -> bool:
         if type(pid) is not int or pid <= 0 or not isinstance(started, str):
@@ -98,6 +83,7 @@ class LinuxPlatform:
             directory = source_root
             service_environment = {"PYTHONPATH": str(source_root)}
         if inhibit:
+            self.require_write_support()
             inhibitor = shutil.which("systemd-inhibit")
             launcher = shutil.which("systemd-run")
             if not inhibitor or not launcher:
@@ -117,11 +103,47 @@ class LinuxPlatform:
         return WorkerLaunch(command, environment, directory)
 
     def start_worker(self, launch: WorkerLaunch, log_path: Path) -> None:
+        options = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
+                   if sys.platform == "win32" else {"start_new_session": True})
         with log_path.open("ab") as log:
             subprocess.Popen(
                 launch.command, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                cwd=launch.directory, env=launch.environment, start_new_session=True, close_fds=True,
+                cwd=launch.directory, env=launch.environment, close_fds=True, **options,
             )
+
+
+class LinuxPlatform(Platform):
+    """Concrete host services; inject another adapter into Service when porting."""
+
+    native_write = True
+
+    def __init__(self):
+        if not sys.platform.startswith("linux"):
+            raise RuntimeError("8BitDo Updater currently supports Linux hosts only.")
+
+    def discover(self):
+        return discover()
+
+    def inspect_device(self, device, lock_dir):
+        return inspect_device(device, lock_dir)
+
+    def open_hid(self, *args, **kwargs):
+        return HidrawTransport(*args, **kwargs)
+
+    def require_boot_access(self, device):
+        return require_boot_access(device)
+
+    def wait_for_boot(self, *args, **kwargs):
+        return wait_for_boot(*args, **kwargs)
+
+    def wait_for_application(self, *args, **kwargs):
+        return wait_for_application(*args, **kwargs)
+
+    def recovery_access(self, state_dir):
+        return RecoveryAccess(state_dir)
+
+    def firmware_service(self):
+        return Fwupd()
 
     def open_official_updater(self, url: str) -> dict:
         if os.geteuid() == 0:
@@ -151,3 +173,84 @@ class LinuxPlatform:
             return {"opened": True}
         except (OSError, subprocess.TimeoutExpired):
             return {"opened": False, "error": f"Could not launch a browser. Open {url} in a WebHID-capable browser."}
+
+
+class DesktopPlatform(Platform):
+    """macOS/Windows discovery and read-only identity queries through HIDAPI."""
+
+    def __init__(self):
+        if sys.platform not in {"darwin", "win32"}:
+            raise RuntimeError("The desktop HIDAPI adapter requires macOS or Windows.")
+
+    def discover(self):
+        from .hidapi_backend import discover_hidapi
+        return discover_hidapi()
+
+    def inspect_device(self, device, lock_dir):
+        from .hidapi_backend import inspect_hidapi
+        return inspect_hidapi(device, lock_dir)
+
+    def open_hid(self, *args, **kwargs):
+        from .hidapi_backend import HidapiTransport
+        return HidapiTransport(*args, **kwargs)
+
+    def recovery_access(self, state_dir):
+        return UnavailableRecoveryAccess()
+
+    def firmware_service(self):
+        return UnavailableFwupd()
+
+    def require_boot_access(self, *args, **kwargs):
+        self.require_write_support()
+
+    wait_for_boot = require_boot_access
+    wait_for_application = require_boot_access
+
+    def open_official_updater(self, url):
+        import webbrowser
+        try:
+            opened = webbrowser.open(url, new=2)
+        except (OSError, webbrowser.Error):
+            opened = False
+        return {"opened": True} if opened else {
+            "opened": False, "error": f"Open {url} in a WebHID-capable browser."
+        }
+
+
+class UnavailableRecoveryAccess:
+    def status(self):
+        from .hidapi_backend import WRITE_UNAVAILABLE
+        return {"configured": False, "pending": False, "can_setup": False, "message": WRITE_UNAVAILABLE}
+
+    def setup(self):
+        raise RuntimeError(self.status()["message"])
+
+
+class UnavailableFwupd:
+    def devices(self):
+        return []
+
+    def releases(self, *args, **kwargs):
+        from .fwupd import FwupdError
+        raise FwupdError("fwupd installation is supported only on Linux.")
+
+    require_device = releases
+    install = releases
+
+
+def platform_capabilities() -> dict[str, bool]:
+    supported = sys.platform.startswith("linux") or sys.platform in {"darwin", "win32"}
+    linux = sys.platform.startswith("linux")
+    return {
+        "discovery": supported, "identity_query": supported, "firmware_download": supported,
+        "native_write": linux, "recovery": linux, "fwupd": linux,
+        "permission_setup": linux, "wireless_probe": linux,
+    }
+
+
+def current_platform():
+    if sys.platform.startswith("linux"):
+        return LinuxPlatform()
+    if sys.platform in {"darwin", "win32"}:
+        return DesktopPlatform()
+    raise RuntimeError("8BitDo Updater supports Linux, macOS, and Windows.")

@@ -1,4 +1,7 @@
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 import os
 import select
 import stat
@@ -17,6 +20,8 @@ class HidrawTransport:
         self.lock_fd: int | None = None
 
     def __enter__(self):
+        if fcntl is None:
+            raise RuntimeError("The hidraw transport requires Linux.")
         self.lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         try:
             self.lock_fd = os.open(self.lock_path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
