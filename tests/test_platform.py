@@ -14,6 +14,9 @@ from eightbitdo.service import Service
 class LinuxPlatformTests(unittest.TestCase):
     def setUp(self):
         self.platform = LinuxPlatform()
+        session = patch('eightbitdo.platform.user_session_environment', side_effect=lambda env: env)
+        session.start()
+        self.addCleanup(session.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)

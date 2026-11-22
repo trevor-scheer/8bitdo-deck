@@ -9,10 +9,12 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
 import uuid
+from urllib.parse import quote
 
 from .access import RecoveryAccess
 from .connection import require_boot_access, wait_for_application, wait_for_boot
@@ -38,6 +40,26 @@ def process_start(pid: int) -> str:
             raise OSError("The worker process is unavailable.") from error
     # comm can contain spaces/parentheses; fields after its final ')' start at 3.
     return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+
+
+def user_session_environment(environment: dict[str, str]) -> dict[str, str]:
+    """Connect system-service hosts such as Decky to their own user's manager."""
+    uid = os.geteuid()
+    runtime = Path(environment.get('XDG_RUNTIME_DIR') or f'/run/user/{uid}')
+    bus = runtime / 'bus'
+    try:
+        directory_info = runtime.lstat()
+        bus_info = bus.lstat()
+        valid = (runtime.is_absolute() and stat.S_ISDIR(directory_info.st_mode)
+                 and directory_info.st_uid == uid and directory_info.st_mode & 0o077 == 0
+                 and stat.S_ISSOCK(bus_info.st_mode) and bus_info.st_uid == uid)
+    except OSError:
+        valid = False
+    if not valid:
+        raise RuntimeError('Cannot start a protected update: your desktop session is unavailable. '
+                           'Sign in to the desktop and try again. No firmware was written.')
+    return environment | {'XDG_RUNTIME_DIR': str(runtime),
+                          'DBUS_SESSION_BUS_ADDRESS': 'unix:path=' + quote(str(bus), safe='/')}
 
 
 class Platform:
@@ -88,6 +110,7 @@ class Platform:
             launcher = shutil.which("systemd-run")
             if not inhibitor or not launcher:
                 raise RuntimeError("Cannot prevent suspend during the firmware update: user-session tools are unavailable.")
+            environment = user_session_environment(environment)
             unit = f"8bitdo-deck-{job_id}-{uuid.uuid4().hex[:12]}"
             # The service manager expands dollars in ExecStart arguments. Doubling
             # them preserves literal paths on systemd versions before 254 too.

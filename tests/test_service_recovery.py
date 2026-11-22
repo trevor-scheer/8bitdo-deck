@@ -232,6 +232,7 @@ class RecoveryServiceTests(unittest.TestCase):
 
     def test_recovery_worker_requires_suspend_inhibitor(self):
         with patch('eightbitdo.platform.shutil.which', side_effect=lambda name: '/usr/bin/' + name), \
+                patch('eightbitdo.platform.user_session_environment', side_effect=lambda env: env), \
                 patch('eightbitdo.platform.subprocess.Popen') as start:
             self.service._spawn(self.job, 'recover')
         command = start.call_args.args[0]
