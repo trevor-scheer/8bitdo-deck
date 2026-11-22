@@ -100,7 +100,8 @@ async function mount(t) {
       state.jobs.set(id, job);
       return job;
     },
-    install_update: async (id) => {
+    install_update: async (id, confirmed) => {
+      assert.equal(confirmed, true, "Installation requires explicit confirmation");
       state.installCalls.push(id);
       const job = { ...state.jobs.get(id), state: "complete", progress: 100, message: "Verified.", can_install: false };
       state.jobs.set(id, job);
@@ -113,7 +114,8 @@ async function mount(t) {
       if (state.recoveryError) throw state.recoveryError;
       return state.recoveryAccess;
     },
-    setup_recovery_access: async () => {
+    setup_recovery_access: async (confirmed) => {
+      assert.equal(confirmed, true, "Permission setup requires explicit confirmation");
       state.recoverySetupCalls++;
       state.recoveryAccess = { ...state.recoveryAccess, pending: true, message: "Approve the SteamOS administrator prompt." };
       return state.recoveryAccess;

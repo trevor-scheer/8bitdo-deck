@@ -3,13 +3,24 @@ import json
 import sys
 from pathlib import Path
 
-from .service import Service
+from . import __version__
+from .api import API_VERSION, UpdaterAPI
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="8BitDo firmware tools for Steam Deck")
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "--worker":
+        if len(arguments) != 4:
+            raise SystemExit("Expected --worker STATE_DIR JOB_ID ACTION.")
+        from .worker import run
+        run(Path(arguments[1]), arguments[2], arguments[3])
+        return 0
+
+    parser = argparse.ArgumentParser(description="8BitDo firmware updater for Linux")
+    parser.add_argument("--version", action="version", version=f"8BitDo Updater {__version__}")
     parser.add_argument("--state-dir", type=Path, help="Directory for local firmware cache and jobs")
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("info", help="Show API version and operations without accessing hardware or state")
     sub.add_parser("scan", help="Identify connected devices and read firmware versions")
     sub.add_parser("probe-wireless", help="Read firmware identity over a reviewed radio path without starting an update")
     sub.add_parser("models", help="List model-specific update guidance")
@@ -29,43 +40,64 @@ def main(argv: list[str] | None = None) -> int:
     recover = sub.add_parser("recover", help="Recover a checked receiver update and verify its returning version")
     recover.add_argument("job_id")
     recover.add_argument("--confirm", action="store_true", help="Confirm the verified recovery action")
+    sub.add_parser("recovery-access", help="Inspect Linux USB recovery permissions without changing them")
+    setup = sub.add_parser("setup-recovery-access", help="Request scoped USB recovery access through administrator authorization")
+    setup.add_argument("--confirm", action="store_true", help="Confirm opening the system authorization prompt")
     sub.add_parser("diagnostics", help="Export sanitized device information")
-    sub.add_parser("official-updater", help="Open 8BitDo's web updater in Chrome")
-    args = parser.parse_args(argv)
-    service = Service(args.state_dir)
-    try:
-        match args.command:
-            case "scan":
-                result = service.scan_devices()
-            case "probe-wireless":
-                result = service.probe_wireless()
-            case "models":
-                result = service.get_models()
-            case "releases":
-                result = service.get_releases(args.model_id)
-            case "prepare":
-                result = service.prepare_update(args.device_id, args.model_id, args.release_id)
-            case "job":
-                result = service.get_job(args.job_id)
-            case "install":
-                if not args.confirm:
-                    parser.error("Review the job's target/version, then supply --confirm to install.")
-                result = service.install_update(args.job_id)
-            case "check-recovery":
-                result = service.check_recovery(args.job_id)
-            case "recover":
-                if not args.confirm:
-                    parser.error("Review check-recovery first, then supply --confirm to recover.")
-                result = service.recover_update(args.job_id, confirmed=True)
-            case "diagnostics":
-                result = service.export_diagnostics()
-            case "official-updater":
-                result = service.open_official_updater()
-        print(json.dumps(result, indent=2))
-        return int(isinstance(result, dict) and ("error" in result or result.get("state") == "failed"))
-    except (OSError, ValueError, RuntimeError) as error:
-        print(json.dumps({"error": str(error)}), file=sys.stderr)
+    sub.add_parser("official-updater", help="Open 8BitDo's official web updater")
+    api = sub.add_parser("api", help="Call a versioned operation and print a JSON response envelope")
+    api.add_argument("operation")
+    api.add_argument("--params", default="{}", help="Operation parameters as a JSON object")
+    api.add_argument("--api-version", type=int, default=API_VERSION)
+    args = parser.parse_args(arguments)
+    if args.command in {"install", "recover", "setup-recovery-access"} and not args.confirm:
+        parser.error("Review the requested operation, then supply --confirm to continue.")
+
+    client = UpdaterAPI(args.state_dir)
+    if args.command == "api":
+        try:
+            parameters = json.loads(args.params)
+            if not isinstance(parameters, dict):
+                raise ValueError("Expected a JSON object")
+        except (ValueError, RecursionError):
+            response = {"api_version": API_VERSION, "ok": False,
+                        "error": {"code": "invalid_parameters", "message": "Parameters must be a valid JSON object."}}
+        else:
+            response = client.request(args.operation, parameters, api_version=args.api_version)
+        print(json.dumps(response, indent=2))
+        return int(not response["ok"] or _failed_job(response.get("result")))
+
+    operations = {
+        "info": ("info", {}),
+        "scan": ("scan_devices", {}),
+        "probe-wireless": ("probe_wireless", {}),
+        "models": ("get_models", {}),
+        "recovery-access": ("get_recovery_access", {}),
+        "setup-recovery-access": ("setup_recovery_access", {"confirmed": True}),
+        "diagnostics": ("export_diagnostics", {}),
+        "official-updater": ("open_official_updater", {}),
+    }
+    if args.command == "releases":
+        operation, parameters = "get_releases", {"model_id": args.model_id}
+    elif args.command == "prepare":
+        operation, parameters = "prepare_update", {"device_id": args.device_id, "model_id": args.model_id, "release_id": args.release_id}
+    elif args.command in {"job", "install", "check-recovery", "recover"}:
+        operation = {"job": "get_job", "install": "install_update", "check-recovery": "check_recovery", "recover": "recover_update"}[args.command]
+        parameters = {"job_id": args.job_id}
+        if args.command in {"install", "recover"}:
+            parameters["confirmed"] = True
+    else:
+        operation, parameters = operations[args.command]
+    response = client.request(operation, parameters)
+    if not response["ok"]:
+        print(json.dumps({"error": response["error"]["message"]}), file=sys.stderr)
         return 1
+    print(json.dumps(response["result"], indent=2))
+    return int(_failed_job(response["result"]))
+
+
+def _failed_job(result) -> bool:
+    return isinstance(result, dict) and result.get("state") == "failed"
 
 
 if __name__ == "__main__":

@@ -88,7 +88,7 @@ function RecoveryAccessSettings({ disabled }: { disabled: boolean }) {
         onClick={() => {
           setStarting(true);
           setError("");
-          void setupRecoveryAccess().then((result) => {
+          void setupRecoveryAccess(true).then((result) => {
             if (alive.current) setAccess(result);
           }).catch((reason: unknown) => {
             if (alive.current) setError(`Could not set up recovery access: ${errorMessage(reason)}`);
@@ -326,7 +326,7 @@ function Content() {
         <PanelSectionRow>
           <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {
             setConfirmInstall(false);
-            const result = await installUpdate(job.id);
+            const result = await installUpdate(job.id, true);
             if (alive.current) setJob(result);
           })}>Confirm firmware installation</ButtonItem>
         </PanelSectionRow>
