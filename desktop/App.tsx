@@ -20,6 +20,7 @@ import type {
 import { desktopAPI, quitDesktop } from "./bridge";
 
 const LAST_JOB = "8bitdo-updater:last-job";
+const MAX_STATUS_RETRIES = 3;
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 const identity = (device: Device) =>
@@ -121,6 +122,8 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
   const [loadingReleases, setLoadingReleases] = useState(false);
   const [jobId, setJobId] = useState(readJob);
   const [job, setJob] = useState<Job | null>(null);
+  const [jobError, setJobError] = useState("");
+  const [pollRevision, setPollRevision] = useState(0);
   const [access, setAccess] = useState<RecoveryAccess | null>(null);
   const [confirmation, setConfirmation] = useState<
     "install" | "recovery" | "app" | "app-recovery" | null
@@ -128,7 +131,7 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
   const [channel, setChannel] = useState("stable");
   const [appUpdate, setAppUpdate] = useState<AppUpdate | null>(null);
   const active = !!job && jobIsActive(job.state);
-  const locked = busy || active;
+  const locked = busy || active || !!jobError;
   const device = devices.find((item) => item.id === selected.deviceId);
   const model = models.find((item) => item.id === selected.modelId);
   const release = releases.find((item) => item.id === releaseId);
@@ -251,19 +254,31 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
   }, [api, selected.modelId]);
 
   useEffect(() => {
-    if (!jobId || busy) return;
+    if (!jobId) {
+      setJobError("");
+      return;
+    }
+    if (busy) return;
     let cancelled = false;
+    let failures = 0;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
         const result = await api.request<Job>("get_job", { job_id: jobId });
         if (cancelled) return;
+        failures = 0;
+        setJobError("");
         setJob(result);
         if (jobIsActive(result.state))
           timer = setTimeout(() => void poll(), 1000);
       } catch (reason) {
-        if (!cancelled)
-          setError(`Could not read update progress: ${errorText(reason)}`);
+        if (cancelled) return;
+        failures++;
+        const retry = failures <= MAX_STATUS_RETRIES;
+        setJobError(
+          `Could not read update progress: ${errorText(reason)}. ${retry ? "Retrying status…" : "Automatic retries stopped. Retry status to check the worker again."}`,
+        );
+        if (retry) timer = setTimeout(() => void poll(), 1000 * 2 ** failures);
       }
     };
     void poll();
@@ -271,7 +286,7 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [api, jobId, busy]);
+  }, [api, jobId, busy, pollRevision]);
 
   useEffect(() => {
     if (page !== "settings") return;
@@ -303,7 +318,10 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
     try {
       await action();
     } catch (reason) {
-      if (alive.current) setError(errorText(reason));
+      if (alive.current) {
+        setConfirmation(null);
+        setError(errorText(reason));
+      }
     } finally {
       acting.current = false;
       if (alive.current) setBusy(false);
@@ -447,6 +465,18 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
           <p className="alert" role="status">
             {notice}
           </p>
+        )}
+        {jobError && (
+          <div className="alert error" role="alert">
+            <strong>Update status is temporarily unavailable</strong>
+            <p>{jobError}</p>
+            <button
+              disabled={busy}
+              onClick={() => setPollRevision((revision) => revision + 1)}
+            >
+              Retry status
+            </button>
+          </div>
         )}
         {info?.capabilities?.native_write === false && (
           <div className="alert">
@@ -765,7 +795,7 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
               {!active && (
                 <button
                   className="quiet"
-                  disabled={busy}
+                  disabled={busy || !!jobError}
                   onClick={() => {
                     setJob(null);
                     setJobId("");
