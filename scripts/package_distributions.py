@@ -43,7 +43,7 @@ def prepare():
     metadata = json.loads(subprocess.check_output([
         "cargo", "metadata", "--locked", "--format-version", "1",
         "--manifest-path", str(ROOT / "src-tauri/Cargo.toml"),
-    ], text=True))
+    ], encoding="utf-8"))
     for package in metadata["packages"]:
         if package.get("source") is None:
             continue
