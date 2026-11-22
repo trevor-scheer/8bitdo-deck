@@ -44,7 +44,7 @@ async function mount(t) {
     id: "ultimate2-receiver", name: "Ultimate 2 Wireless", role: "receiver",
     instructions: "Connect receiver by USB.", support: "Native support requires validation.",
   };
-  const controllerModel = { ...receiverModel, id: "ultimate2-controller", role: "controller" };
+  const controllerModel = { ...receiverModel, id: "ultimate2-controller", role: "controller", download_only: true };
   const unknown = {
     id: "ambiguous", name: "Ultimate Wireless", vid: "2dc8", pid: "3109", role: "unknown",
     model_id: null, firmware_version: null, status: "unknown", can_update: false,
@@ -181,13 +181,24 @@ test("manual browsing does not identify hardware or enable an unsupported write"
   await click(unknown.name);
   assert.equal(button("Prepare firmware"), undefined);
   await settle(() => modelPicker().props.onChange({ data: receiverModel.id }));
-  await click("Prepare firmware");
+  await click("Download firmware only");
   assert.deepEqual(state.prepareCalls, [["", receiverModel.id, "r1"]]);
   assert.equal(button("Review installation"), undefined);
   assert.equal(button("Confirm firmware installation"), undefined);
   assert.deepEqual(state.installCalls, []);
   assert.equal(button("Check interrupted update"), undefined);
   assert.equal(button("Confirm receiver recovery"), undefined);
+});
+
+test("unsupported controllers disclose download-only behavior before preparation", async (t) => {
+  const { state, controllerModel, modelPicker, button, click, renderedText } = await mount(t);
+  await settle(() => modelPicker().props.onChange({ data: controllerModel.id }));
+  assert.equal(button("Prepare firmware"), undefined);
+  assert.ok(button("Download firmware only"));
+  assert.ok(renderedText().includes("does not install firmware on this model"));
+  await click("Download firmware only");
+  assert.deepEqual(state.prepareCalls, [["", controllerModel.id, "r1"]]);
+  assert.deepEqual(state.installCalls, []);
 });
 
 test("a qualified target still requires explicit installation confirmation", async (t) => {

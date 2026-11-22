@@ -60,6 +60,51 @@ class ServiceTests(unittest.TestCase):
             self.service.run_prepare(job)
         self.assertFalse(self.service.store.read(job["id"])["can_install"])
 
+    def test_model_download_only_advice_matches_host_and_reviewed_paths(self):
+        models = {model['id']: model for model in self.service.get_models()}
+        self.assertTrue(models['ultimate2-controller']['download_only'])
+        self.assertTrue(models['ultimate-24g-receiver']['download_only'])
+        self.assertFalse(models['ultimate2-receiver']['download_only'])
+        self.assertFalse(models['ultimate-bluetooth-receiver']['download_only'])
+        self.service.platform.native_write = False
+        self.assertTrue(all(model['download_only'] for model in self.service.get_models()))
+
+    def test_manual_download_explains_missing_device_selection(self):
+        job = self.job()
+        self.service.run_prepare(job)
+        self.assertIn('Download only', job['message'])
+        self.assertIn('No identified device', job['message'])
+        self.assertFalse(job['can_install'])
+
+    def test_controller_download_explains_unsupported_installation(self):
+        image = struct.pack('<7I', 106, 0x6000, 4, 0x6012, 0, 0, 0) + b'test'
+        self.image_path.write_bytes(image)
+        self.catalog.download.return_value = replace(self.catalog.download.return_value,
+                                                     sha256=hashlib.sha256(image).hexdigest())
+        job = self.service.store.create('', 'ultimate2-controller', 'release1')
+        self.service.run_prepare(job)
+        self.assertIn('Download only', job['message'])
+        self.assertIn('does not install firmware on this model', job['message'])
+        self.assertFalse(job['can_install'])
+
+    def test_preparation_distinguishes_current_and_unreviewed_source_versions(self):
+        device = Device('usb-' + 'a' * 16, 'Receiver', '2dc8', '6013',
+                        model_id='ultimate2-receiver', status='identified', hid_paths=[Path('/dev/fake')])
+        for source, beta, message in ((106, 0, 'already has the selected firmware 1.06'),
+                                       (105, 0, '1.05 to 1.06'),
+                                       (106, 1, 'beta firmware')):
+            with self.subTest(source=source, beta=beta):
+                job = self.service.store.create(device.id, device.model_id, 'release1')
+                with patch.object(self.service, '_native_device', return_value=device), \
+                        patch.object(self.service.platform, 'open_hid', return_value=MagicMock()), \
+                        patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6013, source, beta)), \
+                        patch('eightbitdo.service.verify_authorization_sources') as verify:
+                    self.service.run_prepare(job)
+                self.assertFalse(job['can_install'])
+                self.assertEqual(job['state'], 'blocked')
+                self.assertIn(message, job['message'])
+                verify.assert_not_called()
+
     def test_version_mismatch_rejected(self):
         self.catalog.list_releases.return_value = [replace(self.release, version="1.07")]
         with self.assertRaisesRegex(ValueError, "version"):

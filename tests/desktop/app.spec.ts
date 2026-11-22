@@ -17,6 +17,7 @@ async function mockBackend(
         id: "ultimate2-controller",
         name: "Ultimate 2 Wireless Controller",
         role: "controller",
+        download_only: true,
         instructions: "Connect the controller by USB.",
         support: "Controller firmware installation is not qualified.",
       },
@@ -24,6 +25,7 @@ async function mockBackend(
         id: "ultimate2-receiver",
         name: "Ultimate 2 Wireless Receiver",
         role: "receiver",
+        download_only: options.nativeWrite === false,
         instructions: "Connect the receiver by USB.",
         support:
           "Experimental receiver updates require exact reviewed firmware.",
@@ -32,6 +34,7 @@ async function mockBackend(
         id: "ultimate-bluetooth-controller",
         name: "Ultimate Bluetooth Controller",
         role: "controller",
+        download_only: true,
         instructions: "Connect by USB.",
         support: "Download and identify only.",
       },
@@ -129,6 +132,7 @@ async function mockBackend(
               can_install:
                 !options.recovery &&
                 !!parameters.device_id &&
+                !models.find((model) => model.id === parameters.model_id)?.download_only &&
                 options.nativeWrite !== false,
               target_label: "Ultimate 2 receiver · 1.01 → 1.06",
               message: "Exact reviewed image is ready.",
@@ -294,7 +298,7 @@ test("library browsing cannot bind a download to an attached device", async ({
   await page
     .getByRole("button", { name: /Catalog.*Ultimate 2 Wireless Receiver/ })
     .click();
-  await page.getByRole("button", { name: "Prepare firmware" }).click();
+  await page.getByRole("button", { name: "Download firmware only" }).click();
   expect((await calls(page, "prepare_update"))[0].parameters.device_id).toBe(
     "",
   );
@@ -326,6 +330,16 @@ test("a pending scan does not overwrite a newer library selection", async ({
       .getByRole("complementary", { name: "Firmware details" })
       .getByRole("heading", { name: "Ultimate Bluetooth Controller" }),
   ).toBeVisible();
+});
+
+test("unsupported controllers disclose download-only behavior before preparation", async ({ page }) => {
+  await mockBackend(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /Connected.*Ultimate 2 Wireless Controller/ }).click();
+  await expect(page.getByRole("button", { name: "Prepare firmware" })).toHaveCount(0);
+  await expect(page.getByText(/does not install firmware on this model/)).toBeVisible();
+  await page.getByRole("button", { name: "Download firmware only" }).click();
+  expect(await calls(page, "install_update")).toHaveLength(0);
 });
 
 test("recovery inspection cannot write and destructive recovery is separately confirmed", async ({
@@ -379,7 +393,7 @@ test("platform limits are visible and installation stays disabled", async ({
   await expect(
     page.getByText("Discovery and downloads are available on this platform."),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Prepare firmware" }).click();
+  await page.getByRole("button", { name: "Download firmware only" }).click();
   await expect(
     page.getByRole("button", { name: "Review installation" }),
   ).toHaveCount(0);
