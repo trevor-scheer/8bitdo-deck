@@ -6,15 +6,15 @@ This is an early development build. Legacy installation through fwupd requires a
 
 ## Choose a package
 
-Download from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases). Version `0.3.0-alpha.2` uses `0.3.0a2` in asset filenames:
+Download from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases). Version `0.3.0-alpha.3` uses `0.3.0a3` in asset filenames:
 
 | Host | Desktop package | CLI package |
 | --- | --- | --- |
-| Linux x86-64, including Steam Deck | `8BitDo-Updater_0.3.0a2_linux-x86_64.AppImage` | `eightbitdo-updater-0.3.0a2-linux-x86_64.tar.gz` |
-| Linux ARM64 | `8BitDo-Updater_0.3.0a2_linux-aarch64.AppImage` | `eightbitdo-updater-0.3.0a2-linux-aarch64.tar.gz` |
-| macOS Apple Silicon | `8BitDo-Updater_0.3.0a2_macos-aarch64.dmg` | `eightbitdo-updater-0.3.0a2-macos-aarch64.tar.gz` |
-| macOS Intel | `8BitDo-Updater_0.3.0a2_macos-x86_64.dmg` | `eightbitdo-updater-0.3.0a2-macos-x86_64.tar.gz` |
-| Windows x86-64 | `8BitDo-Updater_0.3.0a2_windows-x86_64-setup.exe` or `-portable.zip` | `eightbitdo-updater-0.3.0a2-windows-x86_64.zip` |
+| Linux x86-64, including Steam Deck | `8BitDo-Updater_0.3.0a3_linux-x86_64.AppImage` | `eightbitdo-updater-0.3.0a3-linux-x86_64.tar.gz` |
+| Linux ARM64 | `8BitDo-Updater_0.3.0a3_linux-aarch64.AppImage` | `eightbitdo-updater-0.3.0a3-linux-aarch64.tar.gz` |
+| macOS Apple Silicon | `8BitDo-Updater_0.3.0a3_macos-aarch64.dmg` | `eightbitdo-updater-0.3.0a3-macos-aarch64.tar.gz` |
+| macOS Intel | `8BitDo-Updater_0.3.0a3_macos-x86_64.dmg` | `eightbitdo-updater-0.3.0a3-macos-x86_64.tar.gz` |
+| Windows x86-64 | `8BitDo-Updater_0.3.0a3_windows-x86_64-setup.exe` or `-portable.zip` | `eightbitdo-updater-0.3.0a3-windows-x86_64.zip` |
 
 Desktop and CLI packages bundle Python. They do not require Decky. Install version 0.3 manually once if you currently use 0.2; that release cannot check for app updates.
 
@@ -49,8 +49,8 @@ Use **App settings** for application updates, recovery-access setup, diagnostics
 Extract the matching CLI archive. For Linux x86-64:
 
 ```sh
-tar -xzf eightbitdo-updater-0.3.0a2-linux-x86_64.tar.gz
-cd eightbitdo-updater-0.3.0a2-linux-x86_64
+tar -xzf eightbitdo-updater-0.3.0a3-linux-x86_64.tar.gz
+cd eightbitdo-updater-0.3.0a3-linux-x86_64
 ./eightbitdo --version
 ./eightbitdo info
 ```

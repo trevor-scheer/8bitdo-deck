@@ -1,6 +1,6 @@
 {
   "name": "8bitdo-deck",
-  "version": "0.3.0-alpha.2",
+  "version": "0.3.0-alpha.3",
   "description": "A unified 8BitDo firmware companion for Steam Deck",
   "private": true,
   "type": "module",
