@@ -45,10 +45,10 @@ class LegacyRecoveryServiceTests(unittest.TestCase):
         self.service.store.save(self.job)
         self.device = Device(device_id, 'Receiver', '2dc8', '3208', usb_path=port)
         self.runtime = Device(device_id, 'Receiver', '2dc8', '3109', usb_path=port, hid_paths=[Path('/dev/fake')])
-        self.discovery = self.start_patch('eightbitdo.service.discover', return_value=[self.device])
+        self.discovery = self.start_patch('eightbitdo.platform.discover', return_value=[self.device])
         self.context = MagicMock()
         self.context.__enter__.return_value = BootConnection(self.boot, 0x3208)
-        self.open_boot = self.start_patch('eightbitdo.service.wait_for_boot', return_value=self.context)
+        self.open_boot = self.start_patch('eightbitdo.platform.wait_for_boot', return_value=self.context)
 
     def start_patch(self, target, **kwargs):
         patcher = patch(target, **kwargs)
@@ -176,7 +176,7 @@ class LegacyRecoveryServiceTests(unittest.TestCase):
                 with self.service.store.lock('update-' + queued['device_id']):
                     self.fail('Update lock released before version verification')
             return self.runtime, DeviceIdentity(0x6008, 104)
-        with patch('eightbitdo.service.wait_for_application', side_effect=returning), \
+        with patch('eightbitdo.platform.wait_for_application', side_effect=returning), \
                 patch('eightbitdo.service.request_receiver_boot') as enter:
             self.service.run_recover(queued)
         self.assertEqual(self.boot.memory, self.image.payload[0x4000:])
@@ -190,7 +190,7 @@ class LegacyRecoveryServiceTests(unittest.TestCase):
     def test_transfer_without_verified_reconnect_is_not_success_or_retry(self):
         queued = self.queue()
         self.boot.sent.clear()
-        with patch('eightbitdo.service.wait_for_application', side_effect=TimeoutError):
+        with patch('eightbitdo.platform.wait_for_application', side_effect=TimeoutError):
             self.service.run_recover(queued)
         self.assertEqual(queued['state'], 'blocked')
         self.assertIn('not confirmed', queued['message'])
@@ -202,7 +202,7 @@ class LegacyRecoveryServiceTests(unittest.TestCase):
         for version, state in ((103, 'blocked'), (104, 'complete')):
             with self.subTest(version=version):
                 self.service.store.save(self.job)
-                with patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+                with patch('eightbitdo.platform.HidrawTransport', return_value=MagicMock()), \
                         patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6008, version)):
                     result = self.service.check_recovery(self.job['id'])
                 self.assertEqual(result['state'], state)
@@ -215,7 +215,7 @@ class LegacyRecoveryServiceTests(unittest.TestCase):
         self.boot.sent.clear()
         self.open_boot.reset_mock()
         self.discovery.return_value = [self.runtime]
-        with patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+        with patch('eightbitdo.platform.HidrawTransport', return_value=MagicMock()), \
                 patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6008, 103)), \
                 patch('eightbitdo.service.request_receiver_boot') as enter:
             self.service.run_recover(queued)

@@ -171,7 +171,7 @@ class ServiceTests(unittest.TestCase):
     def test_missing_recovery_access_stops_native_update_before_device_io(self):
         job = self.native_job()
         self.service.recovery_access.status.return_value = {'configured': False}
-        with patch('eightbitdo.service.HidrawTransport') as transport:
+        with patch('eightbitdo.platform.HidrawTransport') as transport:
             with self.assertRaisesRegex(ValueError, 'recovery access'):
                 self.service.run_install(job)
         transport.assert_not_called()
@@ -214,7 +214,7 @@ class ServiceTests(unittest.TestCase):
         self.catalog.list_releases.return_value = [release]
         self.catalog.download.return_value = Artifact(job['artifact_path'], job['sha256'], release, False, 'Fixture')
         with patch.object(self.service, '_native_device', return_value=device), \
-                patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+                patch('eightbitdo.platform.HidrawTransport', return_value=MagicMock()), \
                 patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6008, 103)), \
                 patch('eightbitdo.service.qualification_for', return_value=authorization), \
                 patch('eightbitdo.service.request_receiver_boot') as enter, \
@@ -243,15 +243,15 @@ class ServiceTests(unittest.TestCase):
             return boot
         boot_context.__enter__.side_effect = open_boot
         with patch.object(self.service, '_native_device', return_value=device) as reconnect, \
-                patch('eightbitdo.service.HidrawTransport', return_value=runtime), \
+                patch('eightbitdo.platform.HidrawTransport', return_value=runtime), \
                 patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6008, 103)), \
                 patch('eightbitdo.service.qualification_for', return_value=authorization), \
-                patch('eightbitdo.service.require_boot_access') as access, \
+                patch('eightbitdo.platform.require_boot_access') as access, \
                 patch('eightbitdo.service.request_receiver_boot') as enter, \
-                patch('eightbitdo.service.wait_for_boot', return_value=boot_context), \
+                patch('eightbitdo.platform.wait_for_boot', return_value=boot_context), \
                 patch('eightbitdo.service.flash_boot_receiver') as legacy_flash, \
                 patch('eightbitdo.service.flash_application') as modern_flash, \
-                patch('eightbitdo.service.wait_for_application') as returned:
+                patch('eightbitdo.platform.wait_for_application') as returned:
             self.service.run_install(job)
         access.assert_called_once_with(device)
         enter.assert_called_once()
@@ -265,10 +265,10 @@ class ServiceTests(unittest.TestCase):
     def test_legacy_permission_preflight_failure_never_changes_mode(self):
         job, device, authorization = self.legacy_job()
         with patch.object(self.service, '_native_device', return_value=device), \
-                patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+                patch('eightbitdo.platform.HidrawTransport', return_value=MagicMock()), \
                 patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6008, 103)), \
                 patch('eightbitdo.service.qualification_for', return_value=authorization), \
-                patch('eightbitdo.service.require_boot_access', side_effect=PermissionError('Recovery access absent')), \
+                patch('eightbitdo.platform.require_boot_access', side_effect=PermissionError('Recovery access absent')), \
                 patch('eightbitdo.service.request_receiver_boot') as enter, \
                 patch('eightbitdo.service.flash_boot_receiver') as flash:
             with self.assertRaises(PermissionError):
@@ -280,7 +280,7 @@ class ServiceTests(unittest.TestCase):
         job = self.native_job()
         device = Device(job["device_id"], "Receiver", "2dc8", "6013", hid_paths=[Path("/dev/fake")])
         with patch.object(self.service, "_native_device", return_value=device), \
-                patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
+                patch("eightbitdo.platform.HidrawTransport", return_value=MagicMock()), \
                 patch("eightbitdo.service.query_identity", return_value=DeviceIdentity(0x6013, 105)), \
                 patch("eightbitdo.service.flash_application") as flash:
             with self.assertRaisesRegex(ValueError, "authorization"):
@@ -290,7 +290,7 @@ class ServiceTests(unittest.TestCase):
     def test_native_modified_image_fails_before_device_io(self):
         job = self.native_job()
         Path(job["artifact_path"]).write_bytes(b"modified")
-        with patch("eightbitdo.service.HidrawTransport") as transport:
+        with patch("eightbitdo.platform.HidrawTransport") as transport:
             with self.assertRaisesRegex(ValueError, "changed"):
                 self.service.run_install(job)
         transport.assert_not_called()
@@ -306,11 +306,11 @@ class ServiceTests(unittest.TestCase):
         device = Device(job["device_id"], "Receiver", "2dc8", "6013", firmware_version="1.06", hid_paths=[Path("/dev/fake")])
         record = FlashQualification(0x6013, None, 0, job["sha256"], "Test fixture, not hardware evidence", (105,))
         with patch.object(self.service, "_native_device", return_value=device) as rediscover, \
-                patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
+                patch("eightbitdo.platform.HidrawTransport", return_value=MagicMock()), \
                 patch("eightbitdo.service.query_identity", return_value=DeviceIdentity(0x6013, 105)), \
                 patch("eightbitdo.service.qualification_for", return_value=record), \
                 patch("eightbitdo.service.flash_application") as flash, \
-                patch("eightbitdo.service.wait_for_application") as returned:
+                patch("eightbitdo.platform.wait_for_application") as returned:
             self.service.run_install(job)
         flash.assert_called_once()
         self.assertEqual(rediscover.call_count, 1)
@@ -323,11 +323,11 @@ class ServiceTests(unittest.TestCase):
                         usb_path="/sys/devices/fake/1-1", hid_paths=[Path("/dev/fake")])
         record = FlashQualification(0x6013, None, 0, job["sha256"], "Test fixture only", (105,))
         identities = iter((DeviceIdentity(0x6013, 105), DeviceIdentity(0x6013, 106, beta=1)))
-        with patch("eightbitdo.service.discover", return_value=[device]), \
+        with patch("eightbitdo.platform.discover", return_value=[device]), \
                 patch("eightbitdo.connection.discover", return_value=[device]), \
                 patch("eightbitdo.discovery.os.access", return_value=True), \
                 patch("eightbitdo.transport.HidrawTransport", return_value=MagicMock()), \
-                patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
+                patch("eightbitdo.platform.HidrawTransport", return_value=MagicMock()), \
                 patch("eightbitdo.connection.HidrawTransport", return_value=MagicMock()), \
                 patch("eightbitdo.protocol.query_identity", side_effect=lambda *a, **k: next(identities)), \
                 patch("eightbitdo.protocol.query_paired_identity", side_effect=TimeoutError), \
@@ -343,8 +343,8 @@ class ServiceTests(unittest.TestCase):
 
     def test_native_worker_is_launched_under_suspend_inhibitor(self):
         job = self.native_job()
-        with patch("eightbitdo.service.shutil.which", side_effect=lambda name: "/usr/bin/" + name), \
-                patch("eightbitdo.service.subprocess.Popen") as spawn:
+        with patch("eightbitdo.platform.shutil.which", side_effect=lambda name: "/usr/bin/" + name), \
+                patch("eightbitdo.platform.subprocess.Popen") as spawn:
             self.service._spawn(job, "install")
         command = spawn.call_args.args[0]
         self.assertEqual(command[0], "/usr/bin/systemd-run")
@@ -366,8 +366,8 @@ class ServiceTests(unittest.TestCase):
     def test_fwupd_install_worker_uses_protected_user_manager_launch(self):
         job = self.job()
         job.update(backend="fwupd", device_id="fwupd-fixture", model_id="fwupd-fixture")
-        with patch("eightbitdo.service.shutil.which", side_effect=lambda name: "/usr/bin/" + name), \
-                patch("eightbitdo.service.subprocess.Popen") as spawn:
+        with patch("eightbitdo.platform.shutil.which", side_effect=lambda name: "/usr/bin/" + name), \
+                patch("eightbitdo.platform.subprocess.Popen") as spawn:
             self.service._spawn(job, "install")
         command = spawn.call_args.args[0]
         self.assertEqual(command[0], "/usr/bin/systemd-run")
@@ -379,8 +379,8 @@ class ServiceTests(unittest.TestCase):
 
     def test_missing_user_manager_launcher_never_falls_back_to_direct_worker(self):
         job = self.native_job()
-        with patch("eightbitdo.service.shutil.which", side_effect=lambda name: None if name == "systemd-run" else "/usr/bin/" + name), \
-                patch("eightbitdo.service.subprocess.Popen") as spawn:
+        with patch("eightbitdo.platform.shutil.which", side_effect=lambda name: None if name == "systemd-run" else "/usr/bin/" + name), \
+                patch("eightbitdo.platform.subprocess.Popen") as spawn:
             with self.assertRaises(RuntimeError):
                 self.service._spawn(job, "install")
         spawn.assert_not_called()
@@ -396,8 +396,8 @@ class ServiceTests(unittest.TestCase):
             process = real_popen(*args, **kwargs)
             processes.append(process)
             return process
-        with patch("eightbitdo.service.shutil.which", side_effect=lambda name: str(launcher) if name == "systemd-run" else "/usr/bin/" + name), \
-                patch("eightbitdo.service.subprocess.Popen", side_effect=launch):
+        with patch("eightbitdo.platform.shutil.which", side_effect=lambda name: str(launcher) if name == "systemd-run" else "/usr/bin/" + name), \
+                patch("eightbitdo.platform.subprocess.Popen", side_effect=launch):
             self.service._spawn(job, "install")
         self.assertEqual(processes[0].wait(timeout=5), 1)
         log = self.service.store.directory / (job["id"] + ".log")
@@ -411,8 +411,8 @@ class ServiceTests(unittest.TestCase):
 
     def test_native_worker_without_inhibitor_never_starts(self):
         job = self.native_job()
-        with patch("eightbitdo.service.shutil.which", return_value=None), \
-                patch("eightbitdo.service.subprocess.Popen") as spawn:
+        with patch("eightbitdo.platform.shutil.which", return_value=None), \
+                patch("eightbitdo.platform.subprocess.Popen") as spawn:
             with self.assertRaisesRegex(RuntimeError, "prevent suspend"):
                 self.service._spawn(job, "install")
         spawn.assert_not_called()
@@ -436,11 +436,11 @@ class ServiceTests(unittest.TestCase):
                 kwargs["progress"]("verifying", 4, 4)
 
         with patch.object(self.service, "_native_device", return_value=device), \
-                patch("eightbitdo.service.HidrawTransport", return_value=MagicMock()), \
+                patch("eightbitdo.platform.HidrawTransport", return_value=MagicMock()), \
                 patch("eightbitdo.service.query_identity", return_value=DeviceIdentity(0x6013, 105)), \
                 patch("eightbitdo.service.qualification_for", return_value=record), \
                 patch("eightbitdo.service.flash_application", side_effect=perform_flash), \
-                patch("eightbitdo.service.wait_for_application"):
+                patch("eightbitdo.platform.wait_for_application"):
             self.service.run_install(job)
         self.assertEqual(job["state"], "complete")
         self.assertIn("reporting_error", job)

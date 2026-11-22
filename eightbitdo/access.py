@@ -1,12 +1,16 @@
 """Use existing SteamOS recovery access, with scoped setup for other systems."""
 
 import hashlib
+from importlib.resources import files
 import os
 from pathlib import Path
 import shutil
 import stat
 import subprocess
 import threading
+import tempfile
+
+from .runtime import external_environment
 
 
 RULE_PATH = Path('/etc/udev/rules.d/70-8bitdo-deck.rules')
@@ -73,11 +77,11 @@ class RecoveryAccess:
         configured = recovery_access_configured()
         pending = self._process is not None and self._process.poll() is None
         if self._process is not None and not pending and self._process.returncode:
-            self._error = 'System authorization did not complete. Retry in Desktop Mode and approve the administrator prompt.'
+            self._error = 'System authorization did not complete. Retry in a desktop session and approve the administrator prompt.'
         message = ('Recovery USB access is available. No additional setup is needed.' if configured else
-                   'Receiver recovery needs access to two 8BitDo USB interfaces. Setup asks SteamOS for administrator authorization.')
+                   'Receiver recovery needs access to two 8BitDo USB interfaces. Setup asks the system for administrator authorization.')
         if pending:
-            message = 'Approve the SteamOS administrator prompt to configure receiver recovery access.'
+            message = 'Approve the system administrator prompt to configure receiver recovery access.'
         elif not configured and self._error:
             message = self._error
         return {'configured': configured and not pending, 'pending': pending,
@@ -89,12 +93,12 @@ class RecoveryAccess:
             if status['configured'] or status['pending']:
                 return status
             executable = shutil.which('pkexec')
-            script = Path(__file__).resolve().parent.parent / 'scripts/install-udev-rules.sh'
-            if not executable or not script.is_file():
+            if not executable:
                 self._error = 'The system permission installer is unavailable. See the installation guide.'
                 return self.status()
             self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-            environment = dict(os.environ)
+            script = self._stage_installer()
+            environment = external_environment()
             environment.setdefault('DISPLAY', ':0')
             environment.setdefault('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
             environment.setdefault('DBUS_SESSION_BUS_ADDRESS', f'unix:path=/run/user/{os.getuid()}/bus')
@@ -107,5 +111,23 @@ class RecoveryAccess:
                         env=environment, start_new_session=True, close_fds=True,
                     )
             except OSError:
-                self._error = 'Could not open the SteamOS authorization prompt.'
+                self._error = 'Could not open the system authorization prompt.'
             return self.status()
+
+    def _stage_installer(self) -> Path:
+        # One-file bundles disappear after the frontend exits. Keep the exact
+        # packaged helper available until asynchronous administrator approval.
+        data = files("eightbitdo.resources").joinpath("install-udev-rules.sh").read_bytes()
+        directory = self.state_dir / "resources"
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        target = directory / ("install-udev-rules-" + hashlib.sha256(data).hexdigest() + ".sh")
+        fd, temporary = tempfile.mkstemp(prefix=".installer-", dir=directory)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        return target

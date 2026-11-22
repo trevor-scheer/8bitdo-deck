@@ -52,7 +52,7 @@ KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinpu
                 self.assertFalse(steamos_recovery_access_available())
 
     def test_installer_and_readiness_use_identical_scoped_rules(self):
-        script = (Path(__file__).resolve().parent.parent / 'scripts/install-udev-rules.sh').read_text()
+        script = (Path(__file__).resolve().parent.parent / 'eightbitdo/resources/install-udev-rules.sh').read_text()
         embedded = script.split("<<'RULES'\n", 1)[1].split('\nRULES\n', 1)[0] + '\n'
         self.assertEqual(embedded, RULE_TEXT)
         self.assertEqual(RULE_TEXT.count('ATTRS{idVendor}=="2dc8"'), 2)
@@ -92,7 +92,19 @@ KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinpu
             spawn.assert_called_once()
             command = spawn.call_args.args[0]
             self.assertEqual(command[:3], ['/usr/bin/pkexec', '--disable-internal-agent', '/bin/bash'])
-            self.assertTrue(command[3].endswith('/scripts/install-udev-rules.sh'))
+            self.assertTrue(Path(command[3]).is_relative_to(Path(root) / 'resources'))
+            self.assertEqual(Path(command[3]).read_bytes(), (Path(__file__).resolve().parent.parent / 'eightbitdo/resources/install-udev-rules.sh').read_bytes())
+
+    def test_staged_helper_survives_bundle_removal_and_is_private(self):
+        with tempfile.TemporaryDirectory() as root:
+            resource = Mock()
+            resource.joinpath.return_value.read_bytes.return_value = b"#!/bin/bash\necho fixture\n"
+            with patch('eightbitdo.access.files', return_value=resource):
+                script = RecoveryAccess(Path(root))._stage_installer()
+            self.assertTrue(script.is_relative_to(Path(root) / 'resources'))
+            self.assertEqual(script.read_bytes(), b"#!/bin/bash\necho fixture\n")
+            self.assertEqual(script.stat().st_mode & 0o777, 0o600)
+            self.assertIn(hashlib.sha256(script.read_bytes()).hexdigest(), script.name)
 
     def test_declined_authorization_stays_unconfigured(self):
         with patch('eightbitdo.access.recovery_access_configured', return_value=False):

@@ -2,18 +2,14 @@ import hashlib
 import json
 import os
 import re
-import shutil
-import subprocess
-import sys
 import time
-import uuid
 from pathlib import Path
 
+from . import __version__
 from .catalog import Catalog
-from .access import RecoveryAccess
-from .connection import require_boot_access, wait_for_application, wait_for_boot
-from .discovery import Device, clean_text, discover, inspect_device
-from .fwupd import Fwupd, FwupdError
+from .discovery import Device, clean_text
+from .fwupd import FwupdError
+from .platform import LinuxPlatform
 from .jobs import ACTIVE_STATES, JobStore, default_state_dir, public_job
 from .legacy_protocol import (
     LegacySourceReviewedAuthorization, flash_boot_receiver, inspect_receiver_boot, request_receiver_boot,
@@ -26,19 +22,19 @@ from .protocol import (
 from .recovery import finish_recovery, inspect_recovery
 from .qualifications import qualification_for
 from .registry import MODELS, get_model
-from .transport import HidrawTransport
 
 
 OFFICIAL_UPDATER = "https://web.8bitdo.com/"
 
 
 class Service:
-    def __init__(self, state_dir: Path | None = None, *, catalog=None, fwupd=None):
+    def __init__(self, state_dir: Path | None = None, *, catalog=None, fwupd=None, platform=None):
         self.state_dir = Path(state_dir) if state_dir is not None else default_state_dir()
         self.store = JobStore(self.state_dir)
+        self.platform = platform if platform is not None else LinuxPlatform()
         self.catalog = catalog if catalog is not None else Catalog()
-        self.fwupd = fwupd if fwupd is not None else Fwupd()
-        self.recovery_access = RecoveryAccess(self.state_dir)
+        self.fwupd = fwupd if fwupd is not None else self.platform.firmware_service()
+        self.recovery_access = self.platform.recovery_access(self.state_dir)
 
     def get_recovery_access(self) -> dict:
         return self.recovery_access.status()
@@ -47,9 +43,9 @@ class Service:
         return self.recovery_access.setup()
 
     def _devices(self, probe: bool = True) -> tuple[list[Device], list[str]]:
-        devices = discover()
+        devices = self.platform.discover()
         if probe:
-            devices = [inspect_device(d, self.state_dir / "locks") for d in devices]
+            devices = [self.platform.inspect_device(d, self.state_dir / "locks") for d in devices]
             paired_devices = [Device(
                 id="paired-" + d.id.removeprefix("usb-"),
                 name="Ultimate 2 Wireless controller (via receiver)", vid="2dc8", pid="wireless",
@@ -73,14 +69,14 @@ class Service:
         from .wireless import query_wireless_target
 
         results = []
-        for device in discover():
+        for device in self.platform.discover():
             if int(device.pid, 16) not in (0x310B, 0x6013):
                 continue
             result = {"id": device.id, "can_update": False}
             try:
                 if not device.hid_paths:
                     raise ValueError("No compatible USB control interface")
-                with HidrawTransport(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
+                with self.platform.open_hid(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
                     target = query_wireless_target(transport, usb_pid=int(device.pid, 16))
                 result.update(status="radio_identity_verified", receiver_version=target.receiver.version,
                               controller_version=target.controller.version, controller_pid=f"{target.controller.pid:04x}",
@@ -118,36 +114,17 @@ class Service:
             return {"releases": [], "error": clean_text(str(error), 600)}
 
     def _spawn(self, job: dict, action: str) -> None:
-        executable = shutil.which("python3") or sys.executable
-        source_root = Path(__file__).resolve().parent.parent
-        environment = dict(os.environ)
-        environment["PYTHONPATH"] = str(source_root)
-        command = [executable, "-m", "eightbitdo.worker", str(self.state_dir), job["id"], action]
-        if action == "install" or (action == "recover" and job.get("backend") == "hid"):
-            inhibitor = shutil.which("systemd-inhibit")
-            launcher = shutil.which("systemd-run")
-            if not inhibitor or not launcher:
-                raise RuntimeError("Cannot prevent suspend during the firmware update: user-session tools are unavailable.")
-            self.store.path(job["id"])
-            unit = f"8bitdo-deck-{job['id']}-{uuid.uuid4().hex[:12]}"
-            # Decky's unprivileged backend remains in a system-service cgroup.
-            # The user manager gives the worker normal local-session authorization.
-            command = [launcher, "--user", "--collect", "--wait", "--pipe", "--no-ask-password",
-                       "--service-type=exec", "--expand-environment=no", "--unit=" + unit,
-                       "--working-directory=" + str(source_root), "--setenv=PYTHONPATH=" + str(source_root),
-                       inhibitor, "--no-ask-password", "--what=sleep", "--mode=block", "--who=8BitDo Deck",
-                       "--why=Updating controller firmware", *command]
+        self.store.path(job["id"])
+        launch = self.platform.worker_launch(
+            self.state_dir, job["id"], action,
+            inhibit=action == "install" or (action == "recover" and job.get("backend") == "hid"),
+        )
         job["worker_action"] = action
         job["worker_pid"] = None
         job["started_at"] = time.time()
         self.store.save(job)
         try:
-            with (self.store.directory / (job["id"] + ".log")).open("ab") as log:
-                subprocess.Popen(
-                    command,
-                    stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                    cwd=source_root, env=environment, start_new_session=True, close_fds=True,
-                )
+            self.platform.start_worker(launch, self.store.directory / (job["id"] + ".log"))
         except OSError as error:
             job.update(state="failed", message="Could not start the background worker.", can_install=False)
             self.store.save(job)
@@ -182,10 +159,7 @@ class Service:
         job = self.store.read(job_id)
         if job["state"] in ACTIVE_STATES and time.time() - job.get("started_at", job["created_at"]) > 10:
             pid = job.get("worker_pid")
-            try:
-                running = bool(pid) and Path(f"/proc/{pid}/stat").read_text().split()[21] == job.get("worker_start")
-            except (OSError, IndexError):
-                running = False
+            running = self.platform.worker_running(pid, job.get("worker_start"))
             if not running:
                 # Preserve a concurrently finishing worker's result.
                 try:
@@ -247,7 +221,7 @@ class Service:
         )
         if job["device_id"]:
             device = self._native_device(job["device_id"], model.id)
-            with HidrawTransport(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
+            with self.platform.open_hid(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
                 identity = query_identity(transport, usb_pid=int(device.pid, 16))
                 authorization = qualification_for(image, identity)
                 if authorization is not None:
@@ -288,10 +262,10 @@ class Service:
             self.store.save(job)
 
     def _native_device(self, device_id: str, model_id: str) -> Device:
-        device = next((d for d in discover() if d.id == device_id), None)
+        device = next((d for d in self.platform.discover() if d.id == device_id), None)
         if not device:
             raise ValueError("The selected USB device disconnected. Scan again.")
-        device = inspect_device(device, self.state_dir / "locks")
+        device = self.platform.inspect_device(device, self.state_dir / "locks")
         if device.status != "identified" or device.model_id != model_id or not device.hid_paths:
             raise ValueError("The USB target no longer matches the selected firmware.")
         return device
@@ -311,7 +285,7 @@ class Service:
         if not self.recovery_access.status()['configured']:
             raise ValueError("Configure receiver recovery access before installing firmware.")
         device = self._native_device(job["device_id"], model.id)
-        with HidrawTransport(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
+        with self.platform.open_hid(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
             identity = query_identity(transport, usb_pid=int(device.pid, 16))
             qualification = qualification_for(image, identity)
             if qualification is None or identity.version != job.get("original_version"):
@@ -321,7 +295,7 @@ class Service:
             legacy_receiver = isinstance(qualification, LegacySourceReviewedAuthorization)
             if legacy_receiver:
                 validate_receiver_authorization(image, identity, qualification)
-                require_boot_access(device)
+                self.platform.require_boot_access(device)
             job.update(state="installing", progress=0, can_install=False,
                        original_version_raw=identity.version_raw, original_usb_path=device.usb_path,
                        original_hardware_revision=identity.hardware_revision, recovery_ready=False,
@@ -344,13 +318,13 @@ class Service:
                 flash_application(transport, image, identity=identity, qualification=qualification, progress=progress)
         if legacy_receiver:
             # The runtime fd and its lock must close before opening the new HID node.
-            with wait_for_boot(device, self.state_dir / 'locks') as boot:
+            with self.platform.wait_for_boot(device, self.state_dir / 'locks') as boot:
                 flash_boot_receiver(boot.transport, image, identity=identity, boot_usb_pid=boot.usb_pid,
                                     qualification=qualification, progress=progress)
         job.update(state="verifying", progress=95, message="Waiting for the same USB target and checking its firmware version.")
         self._save_progress(job)
         try:
-            wait_for_application(
+            self.platform.wait_for_application(
                 device, self.state_dir / "locks", expected_product_id=image.product_id,
                 expected_version_raw=image.version_raw & 0xFFFF,
             )
@@ -415,7 +389,7 @@ class Service:
         return result
 
     def _recovery_device(self, job: dict) -> Device:
-        device = next((d for d in discover() if d.id == job["device_id"]), None)
+        device = next((d for d in self.platform.discover() if d.id == job["device_id"]), None)
         runtime_pids = {"3109"} if job["model_id"] == "ultimate-bluetooth-receiver" else {"6013", "310b"}
         if (
             device is None or device.usb_path != job["original_usb_path"]
@@ -429,7 +403,7 @@ class Service:
         runtime_pids = {"3109"} if job["model_id"] == "ultimate-bluetooth-receiver" else {"6013", "310b"}
         if device.pid not in runtime_pids or not device.hid_paths:
             raise ValueError("The receiver has not returned to application mode.")
-        with HidrawTransport(
+        with self.platform.open_hid(
             device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"),
             expected_usb_path=job["original_usb_path"],
         ) as transport:
@@ -467,7 +441,7 @@ class Service:
                 if device.pid != "3208":
                     self._record_recovery_version(job, self._read_recovery_identity(device, job))
                 else:
-                    with wait_for_boot(device, self.state_dir / "locks") as boot:
+                    with self.platform.wait_for_boot(device, self.state_dir / "locks") as boot:
                         if boot.usb_pid != 0x3208:
                             raise ValueError("Unexpected receiver recovery USB personality.")
                         if isinstance(authorization, LegacySourceReviewedAuthorization):
@@ -516,7 +490,7 @@ class Service:
             job.update(state="verifying", recovery_ready=False, can_install=False,
                        message="Rechecking receiver identity, bootloader, metadata, and firmware before recovery.")
             self.store.save(job)
-            with wait_for_boot(device, self.state_dir / "locks") as boot:
+            with self.platform.wait_for_boot(device, self.state_dir / "locks") as boot:
                 if boot.usb_pid != 0x3208:
                     raise ValueError("Unexpected receiver recovery USB personality.")
                 result = finish_recovery(boot.transport, image, authorization=authorization)
@@ -556,7 +530,7 @@ class Service:
                            stage=stage, message=f"Receiver recovery: {stage}. Keep USB connected.")
                 self._save_progress(job)
 
-        with wait_for_boot(device, self.state_dir / "locks") as boot:
+        with self.platform.wait_for_boot(device, self.state_dir / "locks") as boot:
             if boot.usb_pid != 0x3208:
                 raise ValueError("Unexpected receiver recovery USB personality.")
             flash_boot_receiver(boot.transport, image, identity=original, boot_usb_pid=boot.usb_pid,
@@ -565,7 +539,7 @@ class Service:
                    message="Cached firmware reinstalled. Verifying the same receiver's target version.")
         self._save_progress(job)
         try:
-            _, identity = wait_for_application(
+            _, identity = self.platform.wait_for_application(
                 device, self.state_dir / "locks", expected_product_id=0x6008,
                 expected_version_raw=image.version_raw & 0xFFFF,
             )
@@ -585,7 +559,7 @@ class Service:
     def export_diagnostics(self) -> dict:
         devices, warnings = self._devices(probe=False)
         payload = {
-            "schema_version": 1, "app_version": "0.1.7",
+            "schema_version": 1, "app_version": __version__,
             "devices": [{k: v for k, v in d.public().items() if k in {
                 "vid", "pid", "role", "firmware_version", "status", "can_update", "backend",
             }} for d in devices],
@@ -600,27 +574,4 @@ class Service:
         return {"path": str(path)}
 
     def open_official_updater(self) -> dict:
-        if os.geteuid() == 0:
-            return {"opened": False, "error": "Run the plugin as the desktop user to open Chrome."}
-        executable = shutil.which("flatpak")
-        if not executable:
-            return {"opened": False, "error": "Install Google Chrome from Discover, then open https://web.8bitdo.com/ in Desktop Mode."}
-        try:
-            installed = subprocess.run([executable, "info", "com.google.Chrome"], capture_output=True, timeout=10)
-            if installed.returncode:
-                return {"opened": False, "error": "Install Google Chrome from Discover to use the WebHID updater."}
-            environment = dict(os.environ)
-            environment.setdefault("DISPLAY", ":0")
-            environment.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
-            environment.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.getuid()}/bus")
-            process = subprocess.Popen(
-                [executable, "run", "com.google.Chrome", "--new-window", OFFICIAL_UPDATER],
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                env=environment, start_new_session=True,
-            )
-            time.sleep(0.2)
-            if process.poll() not in (None, 0):
-                return {"opened": False, "error": "Chrome could not open. Open https://web.8bitdo.com/ in Desktop Mode."}
-            return {"opened": True}
-        except (OSError, subprocess.TimeoutExpired):
-            return {"opened": False, "error": "Could not launch Chrome. Open https://web.8bitdo.com/ in Desktop Mode."}
+        return self.platform.open_official_updater(OFFICIAL_UPDATER)

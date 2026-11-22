@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .discovery import clean_text
 from .service import Service
+from .platform import process_start
 
 
 def run(state_dir: Path, job_id: str, action: str) -> None:
@@ -17,7 +18,7 @@ def run(state_dir: Path, job_id: str, action: str) -> None:
         if job.get("worker_action", action) != action:
             raise ValueError("Worker action does not match the queued job.")
         job["worker_pid"] = os.getpid()
-        job["worker_start"] = Path("/proc/self/stat").read_text().split()[21]
+        job["worker_start"] = process_start(os.getpid())
         service.store.save(job)
         try:
             if action == "prepare":

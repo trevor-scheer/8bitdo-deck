@@ -8,6 +8,7 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from .discovery import Device, clean_text
+from .runtime import external_environment
 
 
 class FwupdError(RuntimeError):
@@ -61,7 +62,7 @@ class Fwupd:
         try:
             result = subprocess.run(
                 [self.executable, "--json", "--no-unreported-check", "--no-remote-check", *args],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=30, env=external_environment(),
             )
             value = json.loads(result.stdout)
         except subprocess.TimeoutExpired:
@@ -179,7 +180,7 @@ class Fwupd:
                     "--why=Updating controller firmware", self.executable,
                     "--json", "--assume-yes", "--no-unreported-check", "--no-remote-check", "--no-reboot-check",
                     "install", device_id.removeprefix("fwupd-"), expected_version,
-                ], capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=directory)
+                ], capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=directory, env=external_environment())
         except OSError as error:
             raise FwupdError("Could not start the firmware updater.") from error
         if result.returncode:

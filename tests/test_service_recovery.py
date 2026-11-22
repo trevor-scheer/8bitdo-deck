@@ -38,12 +38,12 @@ class RecoveryServiceTests(unittest.TestCase):
         self.service.store.save(self.job)
         self.device = Device(device_id, 'Receiver', '2dc8', '3208', usb_path=port)
         self.runtime = Device(device_id, 'Receiver', '2dc8', '6013', usb_path=port, hid_paths=[Path('/dev/fake')])
-        discovery = patch('eightbitdo.service.discover', return_value=[self.device])
+        discovery = patch('eightbitdo.platform.discover', return_value=[self.device])
         self.discovery = discovery.start()
         self.addCleanup(discovery.stop)
         context = MagicMock()
         context.__enter__.return_value = BootConnection(self.boot, 0x3208)
-        open_boot = patch('eightbitdo.service.wait_for_boot', return_value=context)
+        open_boot = patch('eightbitdo.platform.wait_for_boot', return_value=context)
         self.open_boot = open_boot.start()
         self.addCleanup(open_boot.stop)
 
@@ -144,7 +144,7 @@ class RecoveryServiceTests(unittest.TestCase):
         for version, state, action in ((106, 'complete', 'target-confirmed'), (101, 'blocked', 'source-unchanged')):
             with self.subTest(version=version):
                 self.service.store.save(self.job)
-                with patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+                with patch('eightbitdo.platform.HidrawTransport', return_value=MagicMock()), \
                         patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6013, version)):
                     result = self.service.check_recovery(self.job['id'])
                 self.assertEqual(result['state'], state)
@@ -182,7 +182,7 @@ class RecoveryServiceTests(unittest.TestCase):
         queued = self.queue()
         self.boot.sent.clear()
         self.discovery.side_effect = [[self.device], [self.runtime]]
-        with patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+        with patch('eightbitdo.platform.HidrawTransport', return_value=MagicMock()), \
                 patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6013, 106)):
             self.service.run_recover(queued)
         self.assertEqual(self.boot.commands.count(7), 1)
@@ -193,7 +193,7 @@ class RecoveryServiceTests(unittest.TestCase):
     def test_return_to_original_firmware_is_not_update_success(self):
         queued = self.queue()
         self.discovery.side_effect = [[self.device], [self.runtime]]
-        with patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+        with patch('eightbitdo.platform.HidrawTransport', return_value=MagicMock()), \
                 patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6013, 101)):
             self.service.run_recover(queued)
         result = self.service.get_job(queued['id'])
@@ -206,7 +206,7 @@ class RecoveryServiceTests(unittest.TestCase):
         self.boot.pending()
         queued = self.queue()
         self.discovery.side_effect = [[self.device], [self.runtime]]
-        with patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+        with patch('eightbitdo.platform.HidrawTransport', return_value=MagicMock()), \
                 patch('eightbitdo.service.query_identity', return_value=DeviceIdentity(0x6013, 101)), \
                 patch('eightbitdo.service.time.monotonic', side_effect=[0, 0, 31]), \
                 patch('eightbitdo.service.time.sleep'):
@@ -224,13 +224,13 @@ class RecoveryServiceTests(unittest.TestCase):
                 with self.service.store.lock('update-' + queued['device_id']):
                     self.fail('Recovery released update lock too early')
             return DeviceIdentity(0x6013, 101)
-        with patch('eightbitdo.service.HidrawTransport', return_value=MagicMock()), \
+        with patch('eightbitdo.platform.HidrawTransport', return_value=MagicMock()), \
                 patch('eightbitdo.service.query_identity', side_effect=identity):
             self.service.run_recover(queued)
 
     def test_recovery_worker_requires_suspend_inhibitor(self):
-        with patch('eightbitdo.service.shutil.which', side_effect=lambda name: '/usr/bin/' + name), \
-                patch('eightbitdo.service.subprocess.Popen') as start:
+        with patch('eightbitdo.platform.shutil.which', side_effect=lambda name: '/usr/bin/' + name), \
+                patch('eightbitdo.platform.subprocess.Popen') as start:
             self.service._spawn(self.job, 'recover')
         command = start.call_args.args[0]
         self.assertEqual(command[0], '/usr/bin/systemd-run')
@@ -239,8 +239,8 @@ class RecoveryServiceTests(unittest.TestCase):
         self.assertTrue(any(value.startswith('--setenv=PYTHONPATH=') for value in command))
         self.assertEqual(command[-1], 'recover')
         self.assertIn('--what=sleep', command)
-        with patch('eightbitdo.service.shutil.which', return_value=None), \
-                patch('eightbitdo.service.subprocess.Popen') as start:
+        with patch('eightbitdo.platform.shutil.which', return_value=None), \
+                patch('eightbitdo.platform.subprocess.Popen') as start:
             with self.assertRaises(RuntimeError):
                 self.service._spawn(self.job, 'recover')
         start.assert_not_called()

@@ -92,8 +92,8 @@ class WirelessTests(unittest.TestCase):
         transport = QueueTransport(preflight() + [product_reply(0x6012), status_report()])
         target = query_wireless_target(transport, usb_pid=0x310B)
         with tempfile.TemporaryDirectory() as temporary, \
-                patch("eightbitdo.service.discover", return_value=[device]), \
-                patch("eightbitdo.service.HidrawTransport"), \
+                patch("eightbitdo.platform.discover", return_value=[device]), \
+                patch("eightbitdo.platform.HidrawTransport"), \
                 patch("eightbitdo.wireless.query_wireless_target", return_value=target):
             result = Service(Path(temporary)).probe_wireless()["devices"][0]
         self.assertEqual(result["controller_pid"], "6012")
