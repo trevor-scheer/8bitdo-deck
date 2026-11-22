@@ -2,14 +2,35 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "8d7cd4cf066e1bd5db1f2207093cc9bf41c6e09b712049b64aad1a89a1aa2b47f5454ff7a531befc85a8ec7f7cff06ff3e883541c916ca4e3840ab2d0def9a01"
+   "sig": "b3c8faad57136d68228a23286a1315e2ba1a07f09a66d5972057ffb53be3797b65b5a161a4e98e4079fdbabdbc886c548ff7df9284ecf025768905287b6b4b00"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-22T20:21:49Z",
+  "expires": "2026-12-22T20:38:14Z",
   "spec_version": "1.0.31",
-  "targets": {},
-  "version": 2
+  "targets": {
+   "eightbitdo-cli-linux-x86_64-0.3.0a1.tar.gz": {
+    "custom": {
+     "tufup": {
+      "required": false
+     },
+     "user": {
+      "arch": "x86_64",
+      "platform": "linux",
+      "product": "cli",
+      "release_notes": "This alpha adds a standalone desktop app for Linux, macOS, and Windows alongside the Decky plugin and command-line updater.\n\n- Browse connected devices and available firmware through a shared interface, with component illustrations and clearer controller/receiver identification.\n- Install native desktop packages or standalone binaries with the Python backend included. No separate Python installation is needed.\n- Check signed application updates on the Stable or Alpha channel. Review the version and release notes before applying an update. Desktop updates finish after the app closes and retain a backup for interrupted-update recovery.\n- Use the same versioned backend API from the desktop app, Decky, or CLI. Application replacement is blocked while firmware workers are active, including workers using a custom state directory.\n\n**Firmware support remains limited.** macOS and Windows support device discovery, firmware identity queries, and firmware browsing/preparation. Firmware installation and recovery are disabled on those operating systems until their write paths are validated. Linux retains the specifically reviewed receiver update and recovery paths; this release does not enable firmware installation for every 8BitDo model or wireless controller updates.\n\n**The macOS and Windows installers are not OS-signed.** They have no Apple Developer ID/notarization or Windows Authenticode signature, so the operating system may warn about or block launching them. TUF signatures verify application-update content; they do not replace OS publisher signing.\n\nThis is a prerelease. Select **Alpha** to receive subsequent alpha application updates. Updating the app does not update any controller firmware or authorize a firmware write.\n",
+      "release_tag": "v0.3.0-alpha.1",
+      "schema": 1,
+      "version": "0.3.0a1"
+     }
+    },
+    "hashes": {
+     "sha256": "b1dbc7c2af5ee9c46cac2218fd2b1c1bf5f614308018a6a378e40adeee5eece4"
+    },
+    "length": 29196443
+   }
+  },
+  "version": 3
  }
 }
