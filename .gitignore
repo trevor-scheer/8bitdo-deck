@@ -1,6 +1,7 @@
 node_modules/
 dist/
 out/
+build/
 __pycache__/
 *.py[cod]
 .venv/

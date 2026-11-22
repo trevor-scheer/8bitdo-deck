@@ -15,6 +15,9 @@ SPEC.loader.exec_module(package_script)
 class PackageTests(unittest.TestCase):
     def make_project(self, root: Path):
         (root / "eightbitdo").mkdir()
+        (root / "eightbitdo/resources").mkdir()
+        (root / "eightbitdo/resources/__init__.py").write_text("")
+        (root / "eightbitdo/resources/install-udev-rules.sh").write_text("#!/bin/bash\nexit 0\n")
         (root / "dist").mkdir()
         (root / "scripts").mkdir()
         (root / "scripts/install-udev-rules.sh").write_text("#!/bin/bash\nexit 0\n")
@@ -77,6 +80,14 @@ class PackageTests(unittest.TestCase):
             (root / "package.json").write_text(json.dumps({
                 "name": "8bitdo-deck", "dependencies": {"@decky/api": "1.1.3"},
             }))
+            with self.assertRaisesRegex(ValueError, "Missing"):
+                package_script.package_files(root)
+
+    def test_missing_permission_helper_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.make_project(root)
+            (root / "eightbitdo/resources/install-udev-rules.sh").unlink()
             with self.assertRaisesRegex(ValueError, "Missing"):
                 package_script.package_files(root)
 

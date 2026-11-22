@@ -13,7 +13,11 @@ import zipfile
 
 PACKAGE_NAME = "8bitdo-deck"
 FIXED_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
-REQUIRED_FILES = ("package.json", "plugin.json", "main.py", "eightbitdo/__init__.py", "dist/index.js", "scripts/install-udev-rules.sh")
+REQUIRED_FILES = (
+    "package.json", "plugin.json", "main.py", "eightbitdo/__init__.py", "dist/index.js",
+    "scripts/install-udev-rules.sh", "eightbitdo/resources/__init__.py",
+    "eightbitdo/resources/install-udev-rules.sh",
+)
 DECKY_API_MATERIALS = (
     "THIRD_PARTY_NOTICES.md", "third_party/licenses/decky-api-LGPL-2.1.txt", "third_party/licenses/tslib.txt",
     "third_party/decky-api/LICENSE", "third_party/decky-api/README.md", "third_party/decky-api/package.json",
@@ -28,7 +32,8 @@ def package_files(root: Path) -> list[Path]:
     manifest = json.loads((root / "plugin.json").read_text())
     package = json.loads((root / "package.json").read_text())
     paths = {Path(name) for name in REQUIRED_FILES}
-    paths.update(path.relative_to(root) for path in (root / "eightbitdo").glob("*.py"))
+    paths.update(path.relative_to(root) for path in (root / "eightbitdo").rglob("*.py"))
+    paths.update(path.relative_to(root) for path in (root / "eightbitdo/resources").glob("*.sh"))
     paths.update(path.relative_to(root) for path in (root / "docs").glob("*.md"))
     if "@decky/api" in package.get("dependencies", {}):
         paths.update(Path(name) for name in DECKY_API_MATERIALS)

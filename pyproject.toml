@@ -3,14 +3,34 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "eightbitdo-deck"
-version = "0.1.7"
-description = "8BitDo firmware discovery and update tools for Steam Deck"
+name = "eightbitdo-updater"
+dynamic = ["version"]
+description = "Shared 8BitDo firmware updater for Linux, with CLI and Decky frontends"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
+eightbitdo = "eightbitdo.cli:main"
 eightbitdo-deck = "eightbitdo.cli:main"
+
+[project.urls]
+Repository = "https://github.com/trevor-scheer/8bitdo-deck"
+Issues = "https://github.com/trevor-scheer/8bitdo-deck/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "eightbitdo.__version__"}
+
+[tool.setuptools.package-data]
+eightbitdo = ["resources/*.sh", "py.typed"]
 
 [tool.setuptools.packages.find]
 include = ["eightbitdo*"]
+
+[dependency-groups]
+build = [
+    "build==1.6.1",
+    "pyinstaller==6.22.3",
+    "setuptools==84.2.1",
+    "wheel==0.48.0",
+]

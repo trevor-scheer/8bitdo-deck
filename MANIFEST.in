@@ -1,0 +1,4 @@
+include requirements-build.txt
+recursive-include packaging *.py *.spec *.md
+recursive-include scripts smoke_distributions.py check_version.py
+recursive-include docs *.md
