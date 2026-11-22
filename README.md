@@ -11,7 +11,7 @@ Download a package from [GitHub Releases](https://github.com/trevor-scheer/8bitd
 - **Desktop application:** AppImage for Linux, DMG for macOS, or installer/portable ZIP for Windows. No Python or Decky installation is required.
 - **Standalone CLI:** native executables for the same platforms, with Python bundled.
 - **Python wheel or source distribution:** integrate the shared backend into another application, or install the CLI in a Python environment.
-- **`8bitdo-deck.zip`:** use the same backend through Decky's Gaming Mode interface.
+- **`8bitdo-deck.zip`:** use the same backend through Decky's Gaming Mode interface. See [Decky requirements and setup](docs/decky-requirements.md); the tested SteamOS setup needs no plugin-specific terminal commands or build tools.
 
 Follow the [installation guide](docs/install.md) for requirements, package verification, and setup. Linux and macOS packages cover x86-64 and ARM64; Windows packages cover x86-64. The repository and Decky plugin retain the `8bitdo-deck` name.
 

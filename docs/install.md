@@ -93,7 +93,13 @@ For development, install the checkout with `python3 -m pip install -e .` inside 
 
 ## Get the plugin
 
-Use Python 3.11 or later, Node.js 22, and the pnpm version recorded in `package.json`. From the repository root, run:
+For installation through Decky, download `8bitdo-deck.zip` from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases). Read the [Decky requirements](decky-requirements.md), then follow [Install through Decky](#install-through-decky). The release ZIP does not require Node.js, pnpm, Rust, or a separate Python-package installation.
+
+Development packages are also available from successful [Checks workflow runs](https://github.com/trevor-scheer/8bitdo-deck/actions/workflows/checks.yml). GitHub wraps workflow artifacts in another ZIP: extract that download and use the inner `8bitdo-deck.zip` for installation.
+
+### Build the plugin from source
+
+Skip this section when installing a release ZIP. Use Python 3.11 or later, Node.js 22, and the pnpm version recorded in `package.json`. From the repository root, run:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -106,16 +112,14 @@ python3 scripts/package.py
 
 The package is `out/8bitdo-deck.zip`. The packaging script uses an explicit file list and fixed ZIP metadata, then imports and initializes the packaged Python backend in an isolated temporary directory. It excludes firmware downloads, diagnostics, development dependencies, and frontend source maps.
 
-Alternatively, download `8bitdo-deck.zip` from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases). Development packages are also available from successful [Checks workflow runs](https://github.com/trevor-scheer/8bitdo-deck/actions/workflows/checks.yml). GitHub wraps workflow artifacts in another ZIP: extract that download and use the inner `8bitdo-deck.zip` for installation.
-
 ## Install through Decky
 
-Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader#installation) first if it is not already available. Decky 3.3.1 is the tested loader version on SteamOS 3.9.5; older loaders can fail to initialize with newer Steam clients.
+Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader#installation) first if it is not already available. Decky 3.3.1 on SteamOS 3.9.5 is the tested combination, not a verified minimum version. The [Decky requirements and troubleshooting guide](decky-requirements.md) covers Python, systemd/session access, USB permissions, and optional tools. Normal setup on the tested SteamOS system needs no plugin-specific terminal commands.
 
 1. Copy `8bitdo-deck.zip` to the Deck's Downloads folder.
 2. In Gaming Mode, open Decky from the Quick Access menu, then open Decky's settings.
-3. Enable Decky's developer mode if the **Developer** page is hidden.
-4. Open **Developer**, choose the ZIP installation option, and select `8bitdo-deck.zip`. Accept Decky's third-party plugin prompt after checking the package source.
+3. In **Settings → General**, enable **Developer mode** if the **Developer** page is hidden.
+4. Open **Developer → Install Plugin from ZIP File → Browse** and select `8bitdo-deck.zip`. Confirm installation or replacement after checking the package source.
 5. Open **8BitDo Deck** from the plugin list and choose **Scan connected devices**.
 
 The [Decky developer settings implementation](https://github.com/SteamDeckHomebrew/decky-loader/blob/main/frontend/src/components/settings/pages/developer/index.tsx) supports installing a local ZIP. Labels can vary by Decky version and language.
@@ -126,7 +130,7 @@ The plugin runs as the desktop user and does not request Decky's root flag. It d
 
 On normal SteamOS, no terminal command or administrator setup is needed. The plugin recognizes the existing trusted SteamOS policy and checks actual device access. On the tested SteamOS 3.9.5 system, the root-owned `70-steam-jupiter-input.rules` already grants HID access to the active local user. Opening and closing the receiver's recovery interface as the desktop user succeeded without installing rules. The plugin still runs without Decky's root flag.
 
-If another Linux system lacks suitable recovery access, select **Set up receiver recovery** and approve its normal administrator prompt. If Gaming Mode cannot show the prompt, run the packaged fallback installer in Desktop Mode:
+If another Linux system lacks suitable recovery access, select **Set up USB recovery** and approve its normal administrator prompt. If Gaming Mode cannot show the prompt, run the packaged fallback installer in Desktop Mode:
 
 ```sh
 bash ~/homebrew/plugins/8bitdo-deck/scripts/install-udev-rules.sh
