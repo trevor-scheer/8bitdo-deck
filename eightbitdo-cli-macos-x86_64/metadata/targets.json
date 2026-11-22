@@ -2,12 +2,12 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "a32526016c6a227c80cc78a138c2f8abb557e6a2a9fd41dcb24cc9349128640d6c295eca2d0c62e3073902f7196e30dbfb6e615b326939b9045827997a956a08"
+   "sig": "33ac5f37c0960730d19ccebcf2264a4464615789f85b177e1965c5a29f2efcc0d1497f8d9610e17cee962adeb45ac0f23216b11aaa5930d3c3767eb25997a30b"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-22T20:38:21Z",
+  "expires": "2026-12-22T21:42:29Z",
   "spec_version": "1.0.31",
   "targets": {
    "eightbitdo-cli-macos-x86_64-0.3.0a1.tar.gz": {
@@ -29,8 +29,28 @@
      "sha256": "ddc799ec05de21b93986567f5488970b61f94a0e177980b0e343d3c215b2113f"
     },
     "length": 15574210
+   },
+   "eightbitdo-cli-macos-x86_64-0.3.0a2.tar.gz": {
+    "custom": {
+     "tufup": {
+      "required": false
+     },
+     "user": {
+      "arch": "x86_64",
+      "platform": "macos",
+      "product": "cli",
+      "release_notes": "This alpha fixes receiver update workers failing to start from Decky when its backend has no desktop-session environment.\n\n- Protected workers now connect to the current user's verified session bus. Suspend protection remains required; an unavailable session produces a clear error before launching a firmware worker.\n- Both frontends label unsupported models and manual downloads **Download firmware only**. Preparation explains when the selected firmware is already installed or a source-to-destination update is unsupported.\n- Existing receiver installation authorizations are unchanged. Controller flashing over USB, 2.4 GHz, and Bluetooth remains unavailable. This release does not enable additional firmware writes.\n\nTo update Decky, install `8bitdo-deck.zip` using **Decky Settings \u2192 Developer \u2192 Install Plugin from ZIP File**. No terminal environment exports are needed. Enable Developer mode under General if the page is hidden. Installing a desktop or CLI update does not upgrade Decky.\n\nExisting standalone CLI installations can run:\n\n```sh\neightbitdo app-update-check --channel alpha\neightbitdo app-update-apply 0.3.0a2 --channel alpha --confirm\n```\n\nDesktop installations can select **Alpha** in App settings, check for updates, and confirm the new version. macOS and Windows firmware writes remain disabled pending hardware validation; their installers still lack OS publisher signatures.\n",
+      "release_tag": "v0.3.0-alpha.2",
+      "schema": 1,
+      "version": "0.3.0a2"
+     }
+    },
+    "hashes": {
+     "sha256": "1cd048956eefb449d3002fe3d7f533af2e0759fda3e993441ddf2277c48dcb97"
+    },
+    "length": 15575896
    }
   },
-  "version": 3
+  "version": 4
  }
 }

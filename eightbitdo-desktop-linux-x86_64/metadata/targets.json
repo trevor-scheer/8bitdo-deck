@@ -2,12 +2,12 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "186bb7b4b68cbe22a9beb214dd4299ccb5a3521de1b10fe348fa0b3bc5528abf058a71e44cd81abed331453e28b8c8725637bbc8e945cd6a2dfba54a9a7c640b"
+   "sig": "7c516a00ba675bf1fc0b87e8f4bbb183241f6c9eb2c6120a950925e17a93ea672ba3c2f8b2ee8975db77690fa48919764bb5b14cbb251b952598548c1c862301"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-22T20:38:17Z",
+  "expires": "2026-12-22T21:42:25Z",
   "spec_version": "1.0.31",
   "targets": {
    "eightbitdo-desktop-linux-x86_64-0.3.0a1.tar.gz": {
@@ -29,8 +29,28 @@
      "sha256": "1792057ab8e9480d479484b4d43834da95bff60cbe15420268af1c778818fbeb"
     },
     "length": 110979085
+   },
+   "eightbitdo-desktop-linux-x86_64-0.3.0a2.tar.gz": {
+    "custom": {
+     "tufup": {
+      "required": false
+     },
+     "user": {
+      "arch": "x86_64",
+      "platform": "linux",
+      "product": "desktop",
+      "release_notes": "This alpha fixes receiver update workers failing to start from Decky when its backend has no desktop-session environment.\n\n- Protected workers now connect to the current user's verified session bus. Suspend protection remains required; an unavailable session produces a clear error before launching a firmware worker.\n- Both frontends label unsupported models and manual downloads **Download firmware only**. Preparation explains when the selected firmware is already installed or a source-to-destination update is unsupported.\n- Existing receiver installation authorizations are unchanged. Controller flashing over USB, 2.4 GHz, and Bluetooth remains unavailable. This release does not enable additional firmware writes.\n\nTo update Decky, install `8bitdo-deck.zip` using **Decky Settings \u2192 Developer \u2192 Install Plugin from ZIP File**. No terminal environment exports are needed. Enable Developer mode under General if the page is hidden. Installing a desktop or CLI update does not upgrade Decky.\n\nExisting standalone CLI installations can run:\n\n```sh\neightbitdo app-update-check --channel alpha\neightbitdo app-update-apply 0.3.0a2 --channel alpha --confirm\n```\n\nDesktop installations can select **Alpha** in App settings, check for updates, and confirm the new version. macOS and Windows firmware writes remain disabled pending hardware validation; their installers still lack OS publisher signatures.\n",
+      "release_tag": "v0.3.0-alpha.2",
+      "schema": 1,
+      "version": "0.3.0a2"
+     }
+    },
+    "hashes": {
+     "sha256": "7a091df02389630bc82278ba0ba1fd61efee4fa7a1aa4afb1f74ecff44a04754"
+    },
+    "length": 110976902
    }
   },
-  "version": 3
+  "version": 4
  }
 }
