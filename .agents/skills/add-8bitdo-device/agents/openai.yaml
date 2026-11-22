@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add 8BitDo device support"
+  short_description: "Research, implement, and validate new 8BitDo devices"
+  default_prompt: "Use $add-8bitdo-device to add support for my 8BitDo controller or accessory and prepare the contribution for upstream review."

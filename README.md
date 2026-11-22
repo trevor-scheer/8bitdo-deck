@@ -54,6 +54,8 @@ Replace `RELEASE_ID` with an ID returned by `releases` and `JOB_ID` with the ID 
 
 ## Development
 
+To contribute another controller, receiver, accessory, or reviewed firmware version, use the repository's [device-support skill and contributor guide](https://github.com/trevor-scheer/8bitdo-deck/blob/main/CONTRIBUTING.md). The workflow covers discovery, protocol research, implementation, hardware validation, and upstream submission.
+
 ```sh
 python3 -m unittest discover -s tests -v
 pnpm install --frozen-lockfile
