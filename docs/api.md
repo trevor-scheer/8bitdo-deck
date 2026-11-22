@@ -78,7 +78,7 @@ Call `info` for the supported API/application versions, platform support, capabi
 | `info` | None | Application/API information and operation descriptions; no device probe. |
 | `scan_devices` | None | `{devices, warnings}`; queries allowlisted runtime identities. |
 | `probe_wireless` | None | Bounded identity results for reviewed radio routes on Linux; does not install firmware. |
-| `get_models` | None | Model array, including available fwupd entries. |
+| `get_models` | None | Model array, including available fwupd entries. Native models include advisory `download_only`: true when no installation route is enabled for that model on this host. False does not authorize a particular device or firmware image; preparation still checks the exact target and source version. |
 | `get_releases` | `model_id` | `{releases: [...]}` for the selected component. |
 | `prepare_update` | `model_id`, `release_id`; optional `device_id` | `{job_id}`; validates the selection and starts preparation. An omitted or empty device ID browses/downloads without identifying hardware. |
 | `get_job` | `job_id` | Public job status, evidence, installation/recovery capabilities, and progress. |
