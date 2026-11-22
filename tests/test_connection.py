@@ -1,3 +1,4 @@
+import sys
 from dataclasses import replace
 from pathlib import Path
 import tempfile
@@ -25,6 +26,7 @@ class Clock:
         self.now += duration
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux host integration")
 class ConnectionTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()

@@ -1,3 +1,4 @@
+import sys
 import hashlib
 import struct
 import tempfile
@@ -12,6 +13,7 @@ from eightbitdo.service import Service
 from tests.test_recovery import BootDevice
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux host integration")
 class RecoveryServiceTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

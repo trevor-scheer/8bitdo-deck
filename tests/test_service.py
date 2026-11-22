@@ -1,3 +1,4 @@
+import sys
 import hashlib
 import json
 import struct
@@ -18,6 +19,7 @@ from eightbitdo.legacy_protocol import LegacySourceReviewedAuthorization, Receiv
 from eightbitdo.protocol import crc16
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux host integration")
 class ServiceTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

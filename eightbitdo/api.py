@@ -70,6 +70,9 @@ _OPERATIONS = {
     "open_official_updater": _Operation(),
     "get_recovery_access": _Operation(),
     "setup_recovery_access": _Operation((("confirmed", bool),), confirmation=True),
+    "check_app_update": _Operation((("channel", str),)),
+    "apply_app_update": _Operation((("channel", str), ("version", str), ("confirmed", bool)), confirmation=True),
+    "recover_app_update": _Operation((("confirmed", bool),), confirmation=True),
 }
 
 
@@ -88,8 +91,8 @@ class UpdaterAPI:
     @property
     def service(self):
         if self._service is None:
-            if not sys.platform.startswith("linux"):
-                raise APIError("unsupported_platform", "Device operations currently require Linux.")
+            if not (sys.platform.startswith("linux") or sys.platform in {"darwin", "win32"}):
+                raise APIError("unsupported_platform", "Device operations require Linux, macOS, or Windows.")
             with self._service_lock:
                 if self._service is None:
                     from .service import Service
@@ -134,11 +137,14 @@ class UpdaterAPI:
             arguments.pop("confirmed")
         try:
             if operation == "info":
+                from .platform import platform_capabilities
+                capabilities = platform_capabilities()
                 result = {
                     "api_version": API_VERSION,
                     "app_version": __version__,
                     "platform": sys.platform,
-                    "platform_supported": sys.platform.startswith("linux"),
+                    "platform_supported": capabilities["discovery"],
+                    "capabilities": capabilities,
                     "operations": {name: {
                         "parameters": {key: kind.__name__ for key, kind in spec.parameters},
                         "required": [key for key, _ in spec.parameters if key not in spec.optional],

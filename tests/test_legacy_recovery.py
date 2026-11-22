@@ -1,3 +1,4 @@
+import sys
 import hashlib
 import struct
 import tempfile
@@ -14,6 +15,7 @@ from eightbitdo.service import Service
 from tests.test_legacy_protocol import INITIALIZATION, ReceiverDevice, QueueTransport, firmware, reply
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux host integration")
 class LegacyRecoveryServiceTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()

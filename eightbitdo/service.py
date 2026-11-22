@@ -3,13 +3,14 @@ import json
 import os
 import re
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import __version__
 from .catalog import Catalog
 from .discovery import Device, clean_text
 from .fwupd import FwupdError
-from .platform import LinuxPlatform
+from .platform import current_platform
 from .jobs import ACTIVE_STATES, JobStore, default_state_dir, public_job
 from .legacy_protocol import (
     LegacySourceReviewedAuthorization, flash_boot_receiver, inspect_receiver_boot, request_receiver_boot,
@@ -31,10 +32,41 @@ class Service:
     def __init__(self, state_dir: Path | None = None, *, catalog=None, fwupd=None, platform=None):
         self.state_dir = Path(state_dir) if state_dir is not None else default_state_dir()
         self.store = JobStore(self.state_dir)
-        self.platform = platform if platform is not None else LinuxPlatform()
+        self.platform = platform if platform is not None else current_platform()
         self.catalog = catalog if catalog is not None else Catalog()
         self.fwupd = fwupd if fwupd is not None else self.platform.firmware_service()
         self.recovery_access = self.platform.recovery_access(self.state_dir)
+
+    @contextmanager
+    def _queue_guard(self):
+        with self.store.lock("application-mutation"):
+            if (self.state_dir / "app-update-pending.json").exists():
+                raise RuntimeError("An application update is pending. Finish or resolve it before starting firmware jobs.")
+            yield
+
+    @contextmanager
+    def app_update_guard(self):
+        """Exclude job launch/replacement races and refuse running workers."""
+        with self.store.lock("application-mutation"):
+            for path in self.store.directory.glob("*.json"):
+                job = self.store.read(path.stem)
+                if job.get("state") in ACTIVE_STATES or self.platform.worker_running(
+                    job.get("worker_pid"), job.get("worker_start"),
+                ):
+                    raise RuntimeError("Wait for firmware jobs to finish before updating the application.")
+            yield
+
+    def check_app_update(self, channel: str):
+        from .selfupdate import AppUpdater
+        return AppUpdater(self.state_dir, guard=self.app_update_guard).check(channel)
+
+    def apply_app_update(self, channel: str, version: str, confirmed: bool):
+        from .selfupdate import AppUpdater
+        return AppUpdater(self.state_dir, guard=self.app_update_guard).apply(channel, version, confirmed)
+
+    def recover_app_update(self, confirmed: bool):
+        from .selfupdate import AppUpdater
+        return AppUpdater(self.state_dir, guard=self.app_update_guard).recover(confirmed)
 
     def get_recovery_access(self) -> dict:
         return self.recovery_access.status()
@@ -66,6 +98,8 @@ class Service:
         return {"devices": [d.public() for d in devices], "warnings": warnings}
 
     def probe_wireless(self) -> dict:
+        if self.platform.native_write is False:
+            raise RuntimeError("Extended wireless probing is not validated on this operating system. Receiver status is included in device scans.")
         from .wireless import query_wireless_target
 
         results = []
@@ -131,6 +165,10 @@ class Service:
             raise RuntimeError(job["message"]) from error
 
     def prepare_update(self, device_id: str, model_id: str, release_id: str) -> dict:
+        with self._queue_guard():
+            return self._prepare_update(device_id, model_id, release_id)
+
+    def _prepare_update(self, device_id: str, model_id: str, release_id: str) -> dict:
         try:
             if not all(isinstance(value, str) for value in (device_id, model_id, release_id)):
                 raise ValueError("Invalid update selection.")
@@ -173,6 +211,11 @@ class Service:
         return self._public_recovery_job(job)
 
     def install_update(self, job_id: str) -> dict:
+        self.platform.require_write_support()
+        with self._queue_guard():
+            return self._install_update(job_id)
+
+    def _install_update(self, job_id: str) -> dict:
         with self.store.lock(job_id):
             job = self.store.read(job_id)
             if job["state"] != "ready" or not job["can_install"] or job.get("backend") not in {"fwupd", "hid"}:
@@ -219,7 +262,10 @@ class Service:
             version=image.version, sha256=artifact.sha256, artifact_path=artifact.path,
             message="Firmware downloaded; model and version headers match. Native installation is awaiting a reviewed update authorization. " + artifact.verification_note + " Firmware on the device is unchanged.",
         )
-        if job["device_id"]:
+        if self.platform.native_write is False:
+            from .hidapi_backend import WRITE_UNAVAILABLE
+            job["message"] = "Firmware downloaded and header validated. " + WRITE_UNAVAILABLE + " " + artifact.verification_note
+        elif job["device_id"]:
             device = self._native_device(job["device_id"], model.id)
             with self.platform.open_hid(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
                 identity = query_identity(transport, usb_pid=int(device.pid, 16))
@@ -238,6 +284,7 @@ class Service:
         self.store.save(job)
 
     def run_install(self, job: dict) -> None:
+        self.platform.require_write_support()
         if job.get("backend") == "hid":
             with self.store.lock("update-" + job["device_id"]):
                 self._install_native(job)
@@ -429,6 +476,7 @@ class Service:
 
     def check_recovery(self, job_id: str) -> dict:
         """Inspect an eligible failed install without changing device mode or resetting."""
+        self.platform.require_write_support()
         with self.store.lock(job_id):
             job = self.store.read(job_id)
             image, authorization = self._recovery_context(job)
@@ -457,6 +505,11 @@ class Service:
             return self._public_recovery_job(job)
 
     def recover_update(self, job_id: str, confirmed: bool = False) -> dict:
+        self.platform.require_write_support()
+        with self._queue_guard():
+            return self._recover_update(job_id, confirmed)
+
+    def _recover_update(self, job_id: str, confirmed: bool = False) -> dict:
         if confirmed is not True:
             raise ValueError("Review the recovery check and explicitly confirm recovery first.")
         with self.store.lock(job_id):
@@ -473,6 +526,7 @@ class Service:
             return public_job(job)
 
     def run_recover(self, job: dict) -> None:
+        self.platform.require_write_support()
         if job.get("worker_action") != "recover" or job.get("recovery_confirmed") is not True:
             raise ValueError("This job has no confirmed recovery request.")
         image, authorization = self._recovery_context(job, queued=True)

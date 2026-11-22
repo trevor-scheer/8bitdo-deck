@@ -51,8 +51,11 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.service.mock_calls, [])
 
     def test_all_mutations_with_confirmation_require_exact_true(self):
-        for operation in ('install_update', 'recover_update', 'setup_recovery_access'):
-            base = {} if operation == 'setup_recovery_access' else {'job_id': 'fixture'}
+        for operation, base in (
+            ('install_update', {'job_id': 'fixture'}), ('recover_update', {'job_id': 'fixture'}),
+            ('setup_recovery_access', {}), ('apply_app_update', {'channel': 'stable', 'version': '1.0.0'}),
+            ('recover_app_update', {}),
+        ):
             for value in (None, False, 1, 'true'):
                 params = dict(base)
                 if value is not None:
@@ -115,9 +118,20 @@ class APITests(unittest.TestCase):
 
     def test_unsupported_platform_is_explicit_but_info_remains_available(self):
         client = UpdaterAPI()
-        with patch('eightbitdo.api.sys.platform', 'win32'):
+        with patch('eightbitdo.api.sys.platform', 'freebsd14'):
             self.assertFalse(client.request('info')['result']['platform_supported'])
             self.assertEqual(client.request('scan_devices')['error']['code'], 'unsupported_platform')
+
+    def test_desktop_platforms_expose_detection_without_write_readiness(self):
+        for platform in ('darwin', 'win32'):
+            with self.subTest(platform=platform), patch('eightbitdo.api.sys.platform', platform):
+                result = UpdaterAPI().call('info')
+            self.assertTrue(result['platform_supported'])
+            self.assertTrue(result['capabilities']['identity_query'])
+            self.assertTrue(result['capabilities']['firmware_download'])
+            self.assertFalse(result['capabilities']['native_write'])
+            self.assertFalse(result['capabilities']['recovery'])
+            self.assertFalse(result['capabilities']['permission_setup'])
 
 
 class FrontendBoundaryTests(unittest.TestCase):

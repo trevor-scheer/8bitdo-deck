@@ -1,3 +1,4 @@
+import sys
 import hashlib
 import stat
 import tempfile
@@ -12,6 +13,7 @@ from eightbitdo.access import (
 )
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux host integration")
 class RecoveryAccessTests(unittest.TestCase):
     def test_steamos_existing_policy_needs_no_installer_or_receipt(self):
         policy = '''# USB devices and topological children

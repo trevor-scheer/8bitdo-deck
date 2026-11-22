@@ -1,3 +1,4 @@
+import sys
 import json
 import tempfile
 import unittest
@@ -66,6 +67,7 @@ class DescriptorTests(unittest.TestCase):
                 report_layout(descriptor)
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux host integration")
 class DiscoveryTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

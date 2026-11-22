@@ -1,3 +1,4 @@
+import sys
 import struct
 import tempfile
 import unittest
@@ -87,6 +88,7 @@ class WirelessTests(unittest.TestCase):
                 query_wireless_target(transport, **kwargs)
             self.assertEqual(transport.sent, [])
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux service integration")
     def test_service_probe_never_qualifies_installation_or_exposes_paths(self):
         device = Device("usb-test", "Receiver", "2dc8", "310b", hid_paths=[Path("/dev/hidraw7")], usb_path="/private/usb")
         transport = QueueTransport(preflight() + [product_reply(0x6012), status_report()])

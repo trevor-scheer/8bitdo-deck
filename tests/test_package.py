@@ -1,3 +1,4 @@
+import sys
 import importlib.util
 import json
 from pathlib import Path
@@ -50,6 +51,7 @@ class PackageTests(unittest.TestCase):
                 for entry in archive.infolist():
                     self.assertEqual(entry.date_time, package_script.FIXED_TIMESTAMP)
 
+    @unittest.skipIf(sys.platform == "win32", "Creating symlinks requires Windows developer mode")
     def test_missing_frontend_and_symlinks_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
