@@ -94,6 +94,7 @@ def verify_wireless_sources(
     target = query_wireless_target(transport, usb_pid=usb_pid)
     _require_wireless_target(target, authorization)
     _verify_source_regions(transport, _validate_source_regions(authorization.receiver_source_regions, 0x6013), 0x6013)
+    _check_commit_metadata(transport, target.receiver.pid)
     radio = WirelessTransport(transport)
     verify_authorization_sources(radio, image, identity=target.controller, qualification=authorization.controller)
     _check_commit_metadata(radio, target.controller.pid)

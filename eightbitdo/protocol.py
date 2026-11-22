@@ -542,7 +542,9 @@ def _flash_application_blocks(
     for block_start in range(0, total, BLOCK_SIZE):
         notify("verifying", block_start, total)
         _verify_block(
-            transport, block_start, image.payload[block_start:block_start + BLOCK_SIZE],
+            # The bootloader copies whole sectors, including the final sector's
+            # erased tail. Those bytes must be verified before commit as well.
+            transport, block_start, image.payload[block_start:block_start + BLOCK_SIZE].ljust(BLOCK_SIZE, b"\xff"),
             staging_base=STAGING_BASES[image.product_id],
         )
     notify("committing", total, total)

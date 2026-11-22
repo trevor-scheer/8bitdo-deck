@@ -376,7 +376,7 @@ class ProtocolTests(unittest.TestCase):
                     reads = [struct.unpack_from("<HHHHII", report, 2)
                              for report in transport.sent if report[2:4] == b"\x05\0"]
                     self.assertEqual(sum(header[2] for header in reads
-                                         if header[5] >= transport.staging_base), size * 2)
+                                         if header[5] >= transport.staging_base), size + ((size + 4095) // 4096) * 4096)
                     self.assertEqual(result.bytes_verified, size)
                     self.assertEqual(transport.commands[-2:], [0xC4, 7])
 
@@ -388,6 +388,23 @@ class ProtocolTests(unittest.TestCase):
                               qualification=qualification(image))
         self.assertNotIn(5, transport.commands[transport.commands.index(0xC1):])
         self.assertNotIn(0xC4, transport.commands)
+
+    def test_final_sector_padding_is_checked_before_commit(self):
+        for pid in (0x6012, 0x6013):
+            image = parse_firmware(firmware(pid=pid, size=255))
+            transport = FlashDevice(pid=pid, size=255)
+            send = transport.send
+
+            def corrupt_padding(report):
+                send(report)
+                if report[2:4] == b"\x03\0":
+                    transport.memory[transport.staging_base + 255] = 0
+
+            transport.send = corrupt_padding
+            with self.subTest(pid=pid), self.assertRaisesRegex(ProtocolError, "verification failed"):
+                flash_application(transport, image, identity=DeviceIdentity(pid, 106), qualification=qualification(image))
+            self.assertNotIn(0xC4, transport.commands)
+            self.assertNotIn(7, transport.commands)
         self.assertNotIn(7, transport.commands)
 
     def test_initialization_block_size_and_rejection_stop_before_erase(self):
@@ -449,7 +466,8 @@ class ProtocolTests(unittest.TestCase):
                 logical_offsets = list(range(0, 4096, 46)) + list(range(4096, 4150, 46))
                 self.assertEqual(writes, logical_offsets)
                 self.assertEqual(reads, [staging_base - 4096, staging_base - 4096 + 32]
-                                 + [staging_base + offset for offset in logical_offsets] * 2)
+                                 + [staging_base + offset for offset in logical_offsets]
+                                 + [staging_base + block + offset for block in (0, 4096) for offset in range(0, 4096, 46)])
                 self.assertEqual(transport.commands.count(4), 2)
                 self.assertEqual(transport.commands.count(0xC3), 4)
                 self.assertEqual(transport.commands[:5], [8, 0x2100, 5, 5, 0xC1])

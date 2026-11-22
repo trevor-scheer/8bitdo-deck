@@ -138,14 +138,29 @@ class WirelessFlashTests(unittest.TestCase):
             self.assertEqual(device.sent, [])
 
     def test_pending_controller_metadata_stops_before_initialization(self):
+        for component in ("controller", "receiver"):
+            device = RadioDevice()
+            metadata = bytearray(52)
+            struct.pack_into("<I", metadata, 24, 0xAEB14D6C)
+            struct.pack_into("<I", metadata, 48, crc16(metadata[:48]))
+            getattr(device, component).metadata = bytes(metadata)
+            with self.subTest(component=component), self.assertRaisesRegex(ProtocolError, "already pending"):
+                device.flash()
+            self.assertNotIn(0xC1, device.radio_commands)
+
+    def test_corrupted_final_sector_padding_prevents_commit(self):
         device = RadioDevice()
-        metadata = bytearray(52)
-        struct.pack_into("<I", metadata, 24, 0xAEB14D6C)
-        struct.pack_into("<I", metadata, 48, crc16(metadata[:48]))
-        device.controller.metadata = bytes(metadata)
-        with self.assertRaisesRegex(ProtocolError, "already pending"):
+        original_send = device.controller.send
+
+        def send(report):
+            original_send(report)
+            if HEADER.unpack_from(report, 2)[0] == 3:
+                device.controller.memory[0x32000 + len(device.image.payload)] = 0
+
+        device.controller.send = send
+        with self.assertRaisesRegex(ProtocolError, "verification failed"):
             device.flash()
-        self.assertNotIn(0xC1, device.radio_commands)
+        self.assertNotIn(0xC4, device.radio_commands)
 
     def test_bad_initialization_ack_never_erases(self):
         for index, value in ((0, 1), (1, 4), (2, 16), (3, 1), (4, 16), (5, 4096)):
