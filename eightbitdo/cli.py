@@ -11,6 +11,25 @@ from .api import API_VERSION, UpdaterAPI
 _SETUP_WAIT_SECONDS = 300
 
 
+class _LicensesAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        from .runtime import frozen_application
+        if not frozen_application():
+            print('This Python installation uses environment-managed dependencies. '
+                  'See the license files installed with Python and its packages.')
+            parser.exit()
+        directory = Path(sys._MEIPASS) / 'runtime-licenses'
+        notices = sorted(path for path in directory.rglob('*') if path.is_file())
+        if not notices:
+            parser.exit(1, 'Bundled runtime license notices were not found.\n')
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(errors='backslashreplace')
+        for path in notices:
+            print(f'\n{path.relative_to(directory).as_posix()}\n')
+            print(path.read_text(encoding='utf-8', errors='replace'))
+        parser.exit()
+
+
 def _request(client, operation, parameters, *, api_version=API_VERSION):
     if operation != "setup_recovery_access":
         return client.request(operation, parameters, api_version=api_version)
@@ -50,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="8BitDo firmware updater")
     parser.add_argument("--version", action="version", version=f"8BitDo Updater {__version__}")
+    parser.add_argument("--licenses", action=_LicensesAction, nargs=0, help="Print bundled runtime license notices without accessing devices")
     parser.add_argument("--state-dir", type=Path, help="Directory for local firmware cache and jobs")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("info", help="Show API version and operations without accessing hardware or state")

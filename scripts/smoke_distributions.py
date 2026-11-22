@@ -75,6 +75,12 @@ def check(command, root, environment):
 
     assert "8BitDo Updater" in run("--version")
     assert "usage:" in run("--help")
+    notices = run("--licenses")
+    if len(command) == 1:
+        assert all(name in notices for name in ('Python-LICENSE.txt', 'PyInstaller-COPYING.txt', 'BINARY_NOTICES.md'))
+        assert 'tufup-' in notices and 'psutil-' in notices, 'Bundled dependency notices are missing'
+    else:
+        assert 'environment-managed dependencies' in notices
     info = json.loads(run("--state-dir", str(state), "info"))
     assert info["api_version"] == 1 and info["platform_supported"] is True
     assert json.loads(run("api", "info"))["result"] == info

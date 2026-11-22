@@ -59,6 +59,8 @@ Use the equivalent macOS archive, or extract the Windows ZIP and run `.\eightbit
 
 You can place the executable in a user-owned directory on your `PATH`. Keep its path stable while jobs are running, and retain the notices and licenses when redistributing it. HTTPS catalog access and downloads use the host's trusted CA certificates.
 
+Run `eightbitdo --licenses` to read the runtime notices embedded in that executable, including after an application self-update. This command does not access devices or create updater state.
+
 ## Linux firmware requirements
 
 Run the updater as your normal desktop user. Device operations require access to the relevant HID nodes. Native installation and recovery also require a working systemd user manager, `systemd-run`, and `systemd-inhibit` so workers can prevent suspend. Those operations fail before writing if the protected launcher is unavailable. Bundled executables do not replace these host services.

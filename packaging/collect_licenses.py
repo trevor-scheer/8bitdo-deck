@@ -1,6 +1,7 @@
 """Collect component notices from the environment used to build the executable."""
 
 import importlib.metadata
+import argparse
 import json
 from pathlib import Path
 import shutil
@@ -10,7 +11,12 @@ import sysconfig
 
 
 def main():
-    destination = Path(sys.argv[1])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('destination', type=Path)
+    parser.add_argument('--manifest', type=Path,
+                        default=Path(__file__).resolve().parent.parent / 'out/binary-libraries.json')
+    args = parser.parse_args()
+    destination = args.destination
     destination.mkdir(parents=True, exist_ok=True)
     python_license = next(path for path in (
         Path(sysconfig.get_path("stdlib")) / "LICENSE.txt",
@@ -30,8 +36,7 @@ def main():
                 target = destination / (name + "-" + package.version) / str(file).replace("/", "_").replace("\\", "_")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, target)
-    manifest = Path(__file__).resolve().parent.parent / "out/binary-libraries.json"
-    for _, source, _ in json.loads(manifest.read_text()):
+    for _, source, _ in json.loads(args.manifest.read_text()):
         path = Path(source)
         if sys.platform != "linux":
             # Native extensions ship their licenses in their wheel metadata.

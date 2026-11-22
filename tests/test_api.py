@@ -143,7 +143,7 @@ class FrontendBoundaryTests(unittest.TestCase):
         return status, output.getvalue(), errors.getvalue()
 
     def test_help_and_version_do_not_construct_api_or_service(self):
-        for option in ('--help', '--version'):
+        for option in ('--help', '--version', '--licenses'):
             with self.subTest(option=option), \
                     patch('eightbitdo.cli.UpdaterAPI', side_effect=AssertionError('API initialized')), \
                     contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as caught:

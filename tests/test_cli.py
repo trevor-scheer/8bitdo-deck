@@ -1,6 +1,8 @@
 import contextlib
 import io
 import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
@@ -9,6 +11,22 @@ from eightbitdo.cli import main
 
 
 class RecoveryCLITests(unittest.TestCase):
+    def test_bundled_notices_print_on_legacy_windows_encoding_without_service(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'runtime-licenses'
+            directory.mkdir()
+            (directory / 'LICENSE.txt').write_text('Copyright Łukasz', encoding='utf-8')
+            buffer = io.BytesIO()
+            output = io.TextIOWrapper(buffer, encoding='cp1252')
+            with patch('eightbitdo.runtime.frozen_application', return_value=True), \
+                    patch('eightbitdo.cli.sys._MEIPASS', temporary, create=True), \
+                    patch('eightbitdo.cli.UpdaterAPI', side_effect=AssertionError('Service initialized')), \
+                    contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as caught:
+                main(['--licenses'])
+            output.flush()
+            self.assertEqual(caught.exception.code, 0)
+            self.assertIn(b'Copyright \\u0141ukasz', buffer.getvalue())
+
     def run_setup(self, service, *, machine):
         args = (['api', 'setup_recovery_access', '--params', '{"confirmed":true}'] if machine
                 else ['setup-recovery-access', '--confirm'])
