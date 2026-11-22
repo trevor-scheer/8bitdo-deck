@@ -103,10 +103,13 @@ class LinuxPlatform:
             if not inhibitor or not launcher:
                 raise RuntimeError("Cannot prevent suspend during the firmware update: user-session tools are unavailable.")
             unit = f"8bitdo-deck-{job_id}-{uuid.uuid4().hex[:12]}"
+            # The service manager expands dollars in ExecStart arguments. Doubling
+            # them preserves literal paths on systemd versions before 254 too.
+            command = [argument.replace("$", "$$") for argument in command]
             # A user service avoids Decky's system-service authorization context.
             # Pass the frozen restart flag explicitly: the manager does not inherit it.
             command = [launcher, "--user", "--collect", "--wait", "--pipe", "--no-ask-password",
-                       "--service-type=exec", "--expand-environment=no", "--unit=" + unit,
+                       "--service-type=exec", "--unit=" + unit,
                        "--working-directory=" + str(directory),
                        *[f"--setenv={key}={value}" for key, value in service_environment.items()],
                        inhibitor, "--no-ask-password", "--what=sleep", "--mode=block", "--who=8BitDo Updater",

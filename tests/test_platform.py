@@ -67,6 +67,31 @@ class LinuxPlatformTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'python3'):
                 self.platform.worker_launch(self.root, self.job_id, 'prepare', inhibit=False)
 
+    def test_protected_workers_preserve_literal_paths_without_new_systemd_options(self):
+        state = self.root / 'state $HOME ${USER} $$ with spaces'
+        executable = '/opt/controller tools $HOME ${USER} $$/eightbitdo'
+        source_root = '/opt/source tree $HOME ${USER} $$'
+        for frozen in (False, True):
+            with self.subTest(frozen=frozen), \
+                    patch('eightbitdo.platform.frozen_application', return_value=frozen), \
+                    patch('eightbitdo.platform.sys.frozen', False, create=True), \
+                    patch('eightbitdo.platform.sys.executable', executable), \
+                    patch('eightbitdo.platform.__file__', source_root + '/eightbitdo/platform.py'), \
+                    patch('eightbitdo.platform.shutil.which', side_effect=lambda name: '/usr/bin/' + name):
+                launch = self.platform.worker_launch(state, self.job_id, 'install', inhibit=True)
+            self.assertFalse(any(arg.startswith('--expand-environment') for arg in launch.command))
+            expected_worker = [executable, '--worker'] if frozen else [executable, '-m', 'eightbitdo.worker']
+            expected_worker += [str(state), self.job_id, 'install']
+            self.assertEqual(launch.command[-len(expected_worker):],
+                             [arg.replace('$', '$$') for arg in expected_worker])
+            self.assertIn('--working-directory=' + (str(state) if frozen else source_root), launch.command)
+            self.assertIn('--setenv=PYTHONPATH=' + ('' if frozen else source_root), launch.command)
+            self.assertIn('/usr/bin/systemd-inhibit', launch.command)
+            self.assertIn('--what=sleep', launch.command)
+            self.assertIn('--mode=block', launch.command)
+            if frozen:
+                self.assertIn('--setenv=PYINSTALLER_RESET_ENVIRONMENT=1', launch.command)
+
     def test_protected_worker_has_no_uninhibited_fallback(self):
         for missing in ('systemd-run', 'systemd-inhibit'):
             with self.subTest(missing=missing), \
