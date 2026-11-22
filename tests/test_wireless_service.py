@@ -32,7 +32,7 @@ class WirelessServiceTests(unittest.TestCase):
         policy = patch("eightbitdo.qualifications.WIRELESS_AUTHORIZATIONS", (self.radio.authorization,))
         policy.start()
         self.addCleanup(policy.stop)
-        port = "/sys/devices/test/usb1/1-1"
+        port = str(self.root / "usb1" / "1-1")
         digest = hashlib.sha256(port.encode()).hexdigest()[:16]
         self.receiver = Device("usb-" + digest, "Receiver", "2dc8", "310b", role="receiver",
                                model_id="ultimate2-receiver", status="identified", firmware_version="1.06",

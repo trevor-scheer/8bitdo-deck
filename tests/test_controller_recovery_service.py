@@ -17,6 +17,7 @@ from tests.test_controller_recovery import ControllerBoot
 
 
 def device(port, pid='3208'):
+    port = str(port)
     identifier = 'usb-' + hashlib.sha256(port.encode()).hexdigest()[:16]
     return Device(identifier, 'Synthetic controller', '2dc8', pid, usb_path=port, hid_paths=[Path('/dev/fake')])
 
@@ -37,8 +38,8 @@ class ControllerRecoveryServiceTests(unittest.TestCase):
         fingerprint = patch('eightbitdo.controller_recovery.REVIEWED_BOOT_SHA256', self.boot.authorization.source_regions[0].sha256)
         fingerprint.start()
         self.addCleanup(fingerprint.stop)
-        self.receiver = device('/sys/devices/fake/receiver')
-        self.controller = device('/sys/devices/fake/controller')
+        self.receiver = device(self.root / 'receiver')
+        self.controller = device(self.root / 'controller')
         self.devices = [self.controller]
         self.boots = {self.controller.usb_path: self.boot}
         self.platform.discover.side_effect = lambda: self.devices
@@ -87,7 +88,7 @@ class ControllerRecoveryServiceTests(unittest.TestCase):
         for fields in ({'wireless_install_attempted': False}, {'worker_action': 'prepare'}, {'state': 'ready'},
                        {'original_version_raw': 110}, {'controller_edition': 2}, {'receiver_version_raw': 101},
                        {'evidence': 'Changed'}, {'receiver_id': self.controller.id}, {'original_version': '1.08'},
-                       {'device_id': 'paired-invalid'}, {'original_usb_path': '/sys/devices/fake/../receiver'}):
+                       {'device_id': 'paired-invalid'}, {'original_usb_path': str(self.root / '..' / 'receiver')}):
             with self.subTest(fields=fields), self.assertRaises(ValueError):
                 recovery.recovery_context(self.service, dict(self.job, **fields))
         with patch('eightbitdo.qualifications.WIRELESS_AUTHORIZATIONS', ()):
@@ -132,7 +133,7 @@ class ControllerRecoveryServiceTests(unittest.TestCase):
         self.assertEqual(self.job['recovery_device_id'], self.controller.id)
 
     def test_multiple_controllers_are_rejected_before_fingerprinting(self):
-        other = device('/sys/devices/fake/other-controller')
+        other = device(self.root / 'other-controller')
         self.devices.append(other)
         self.boots[other.usb_path] = ControllerBoot()
         with self.assertRaisesRegex(ValueError, 'only the selected controller'):
@@ -143,7 +144,7 @@ class ControllerRecoveryServiceTests(unittest.TestCase):
         self.assertNotIn('recovery_usb_path', self.job)
 
     def test_unknown_or_unresponsive_candidate_does_not_get_ignored(self):
-        other = device('/sys/devices/fake/unresponsive')
+        other = device(self.root / 'unresponsive')
         self.devices.append(other)
         self.boots[other.usb_path] = ControllerBoot()
         self.boots[other.usb_path].timeout = True
@@ -199,7 +200,7 @@ class ControllerRecoveryServiceTests(unittest.TestCase):
     def test_worker_never_rebinds_to_another_controller_port(self):
         self.queued()
         self.boot.sent.clear()
-        other = device('/sys/devices/fake/different-port')
+        other = device(self.root / 'different-port')
         self.devices[:] = [other]
         self.boots[other.usb_path] = self.boot
         with self.assertRaisesRegex(ValueError, 'same controller'):
