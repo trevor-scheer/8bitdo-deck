@@ -4,11 +4,64 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import venv
+
+
+def check_update_helper(binary, root, environment):
+    """Exercise the frozen helper's dependencies and replacement outside the app."""
+    import psutil
+
+    helper = root / Path(binary).name
+    shutil.copy2(binary, helper)
+    destination = root / "application"
+    token = "b" * 32
+    staged = root / f".application.8bitdo-new-{token}"
+    backup = root / f".application.8bitdo-backup-{token}"
+    destination.mkdir()
+    staged.mkdir()
+    (destination / "version").write_text("old")
+    (staged / "version").write_text("new")
+    state = root / "helper-state"
+    state.mkdir()
+    marker = state / "app-update-pending.json"
+    record = dict(schema=1, token=token, destination=str(destination), phase="staged")
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(45)"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    process = None
+    try:
+        record["wait_for"] = [dict(pid=sleeper.pid, created=psutil.Process(sleeper.pid).create_time())]
+        marker.write_text(json.dumps(record))
+        process = subprocess.Popen([str(helper), "--apply-app-update", str(state), token],
+                                   cwd=root, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        time.sleep(2)
+        assert process.poll() is None, "Installer did not wait for the running application"
+        assert (destination / "version").read_text() == "old"
+        sleeper.terminate()
+        sleeper.wait(timeout=10)
+        stdout, stderr = process.communicate(timeout=45)
+        assert process.returncode == 0, (stdout, stderr)
+        assert not marker.exists() and not staged.exists()
+        assert (destination / "version").read_text() == "new"
+        assert (backup / "version").read_text() == "old"
+        record.update(action="recover", wait_for=[])
+        marker.write_text(json.dumps(record))
+        subprocess.run([str(helper), "--apply-app-update", str(state), token],
+                       cwd=root, env=environment, check=True, timeout=45)
+        assert (destination / "version").read_text() == "old"
+        assert not marker.exists() and not staged.exists() and not backup.exists()
+    finally:
+        if sleeper.poll() is None:
+            sleeper.terminate()
+            sleeper.wait(timeout=10)
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.communicate(timeout=10)
+    print("Frozen application helper waited for exit, installed, and rolled back a temporary payload.")
 
 
 def check(command, root, environment):
@@ -65,6 +118,18 @@ def check(command, root, environment):
     assert background.get("worker_pid", 0) > 0 and background.get("worker_start")
     assert not background["can_install"] and background["device_id"] == ""
     assert "No module named" not in background["message"]
+    # A terminal job is saved before process teardown closes its log handle.
+    # Windows cannot delete the temporary installation until teardown finishes.
+    import psutil
+    try:
+        worker = psutil.Process(background["worker_pid"])
+        parent = worker.parent() if len(command) == 1 else None
+        bootloader = parent if parent and Path(parent.exe()).resolve() == Path(command[0]).resolve() else None
+        worker.wait(timeout=15)
+        if bootloader:
+            bootloader.wait(timeout=15)
+    except psutil.NoSuchProcess:
+        pass
     print("Standalone API, confirmation gates, worker dispatch, and parent-exit lifetime passed.")
     print("No device was opened or firmware written; the lifecycle check requested catalog metadata only.")
 
@@ -94,6 +159,8 @@ def main():
                             "from eightbitdo.api import UpdaterAPI"], cwd=root, env=environment, check=True)
             command = [python, "-I", "-m", "eightbitdo"]
         check(command, root, environment)
+        if args.binary:
+            check_update_helper(command[0], root, environment)
 
 
 if __name__ == "__main__":
