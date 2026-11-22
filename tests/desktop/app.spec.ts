@@ -365,7 +365,7 @@ test("recovery inspection cannot write and destructive recovery is separately co
   expect(await calls(page, "recover_update")).toHaveLength(0);
   await page.getByRole("button", { name: "Review recovery" }).click();
   await expect(page.getByRole("dialog")).toContainText(
-    "erase the receiver firmware",
+    "erase the device firmware",
   );
   await page
     .getByRole("button", { name: "Confirm erase and reinstall" })

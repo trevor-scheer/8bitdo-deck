@@ -203,7 +203,7 @@ test("manual browsing does not identify hardware or enable an unsupported write"
   assert.equal(button("Confirm firmware installation"), undefined);
   assert.deepEqual(state.installCalls, []);
   assert.equal(button("Check interrupted update"), undefined);
-  assert.equal(button("Confirm receiver recovery"), undefined);
+  assert.equal(button("Confirm device recovery"), undefined);
 });
 
 test("unsupported controllers disclose download-only behavior before preparation", async (t) => {
@@ -236,15 +236,15 @@ test("a qualified target still requires explicit installation confirmation", asy
 test("receiver recovery setup polls authorization to completion without writing firmware", async (t) => {
   const { state, button, click, renderedText } = await mount(t);
   assert.equal(state.recoveryChecks, 1, "Recovery status is checked on mount");
-  await click("Set up receiver recovery");
+  await click("Set up USB recovery");
   assert.equal(state.recoverySetupCalls, 1);
-  assert.equal(button("Set up receiver recovery").props.disabled, true);
+  assert.equal(button("Set up USB recovery").props.disabled, true);
   assert.ok(renderedText().includes("Approve the SteamOS administrator prompt."));
 
   state.recoveryAccess = { configured: true, pending: false, can_setup: true, message: "Recovery USB access configured." };
   await settle(() => new Promise((resolve) => setTimeout(resolve, 1100)));
   assert.equal(state.recoveryChecks, 2);
-  assert.equal(button("Set up receiver recovery"), undefined);
+  assert.equal(button("Set up USB recovery"), undefined);
   assert.ok(renderedText().includes("Recovery USB access configured."));
   assert.deepEqual(state.prepareCalls, []);
   assert.deepEqual(state.installCalls, []);
@@ -252,11 +252,11 @@ test("receiver recovery setup polls authorization to completion without writing 
 
 test("recovery polling errors stop pending setup and remain visible", async (t) => {
   const { state, button, click, renderedText } = await mount(t);
-  await click("Set up receiver recovery");
+  await click("Set up USB recovery");
   state.recoveryError = new Error("Backend unavailable");
   await settle(() => new Promise((resolve) => setTimeout(resolve, 1100)));
   assert.ok(renderedText().includes("Could not check recovery access: Backend unavailable"));
-  assert.equal(button("Set up receiver recovery").props.disabled, true);
+  assert.equal(button("Set up USB recovery").props.disabled, true);
   assert.deepEqual(state.installCalls, []);
 });
 
@@ -283,7 +283,7 @@ test("interrupted recovery requires checking and explicit confirmation, then res
   state.interrupted = true;
   await click("Prepare firmware");
   assert.ok(button("Check interrupted update"));
-  assert.equal(button("Confirm receiver recovery"), undefined);
+  assert.equal(button("Confirm device recovery"), undefined);
   assert.deepEqual(state.recoverCalls, []);
 
   await click("Check interrupted update");
@@ -291,13 +291,13 @@ test("interrupted recovery requires checking and explicit confirmation, then res
   assert.deepEqual(state.recoverCalls, [], "Checking must never start recovery");
   assert.equal(button("Check interrupted update"), undefined);
   assert.ok(renderedText().includes("Recovery may finish an already committed update. Keep USB connected."));
-  assert.ok(button("Confirm receiver recovery"));
+  assert.ok(button("Confirm device recovery"));
 
   let finishRecovery;
   state.finishRecovery = new Promise((resolve) => { finishRecovery = resolve; });
-  await click("Confirm receiver recovery");
+  await click("Confirm device recovery");
   assert.deepEqual(state.recoverCalls, [["job-1", true]]);
-  assert.equal(button("Confirm receiver recovery").props.disabled, true);
+  assert.equal(button("Confirm device recovery").props.disabled, true);
   await settle(() => finishRecovery());
   assert.ok(renderedText().includes("Recovery queued."));
   assert.equal(button("Scan connected devices").props.disabled, true);
@@ -307,7 +307,7 @@ test("interrupted recovery requires checking and explicit confirmation, then res
   await settle(() => new Promise((resolve) => setTimeout(resolve, 1100)));
   assert.ok(state.jobChecks.length > previousChecks, "Queued recovery must resume polling");
   assert.ok(renderedText().includes("Recovery verified."));
-  assert.equal(button("Confirm receiver recovery"), undefined);
+  assert.equal(button("Confirm device recovery"), undefined);
   assert.deepEqual(state.installCalls, []);
   assert.deepEqual(state.recoverCalls, [["job-1", true]]);
 });
@@ -323,9 +323,9 @@ test("legacy recovery discloses erasing and reinstalling the same cached image b
   assert.deepEqual(state.checkCalls, [["job-1"]]);
   assert.deepEqual(state.recoverCalls, [], "A recovery check must not erase or write firmware");
   assert.deepEqual(state.installCalls, []);
-  assert.ok(renderedText().includes("Recovery will erase the receiver firmware and reinstall the exact cached image for this interrupted update."));
+  assert.ok(renderedText().includes("Recovery will erase the device firmware and reinstall the exact cached image for this interrupted update."));
   assert.ok(!renderedText().includes("Recovery may finish an already committed update."));
-  assert.equal(button("Confirm receiver recovery"), undefined);
+  assert.equal(button("Confirm device recovery"), undefined);
   assert.ok(button("Confirm erase and reinstall"));
 
   await click("Confirm erase and reinstall");
