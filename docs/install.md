@@ -2,7 +2,7 @@
 
 8BitDo Updater shares its backend between a desktop application, a standalone CLI, a Python API, and the 8BitDo Deck Decky plugin. Choose one or more frontends; their firmware compatibility checks, jobs, locks, and recovery rules are the same.
 
-This is an early development build. Legacy installation through fwupd requires a supported 8BitDo device already in bootloader mode and a unique, trusted upgrade release. On Linux, two source-reviewed experimental native updates are enabled after matching preflight: Ultimate 2 Wireless receiver stable 1.01 → official 1.06 and original Ultimate Bluetooth receiver stable 1.03 → official 1.04. Each permits only its exact reviewed image. Native controller, wireless, and other version combinations remain blocked. No native update is hardware-qualified; see the [protocol requirements](protocol.md#authorization-and-hardware-qualification).
+This is an early development build. Legacy installation through fwupd requires a supported 8BitDo device already in bootloader mode and a unique, trusted upgrade release. Linux enables three source-reviewed experimental routes after matching preflight: Ultimate 2 Wireless receiver stable 1.01 → official 1.06, original Ultimate Bluetooth receiver stable 1.03 → official 1.04, and Ultimate 2 Wireless controller stable 1.09 → official 1.10 over 2.4 GHz through receiver 1.06, edition 1. Each permits only its exact reviewed image. Normal direct-USB controller installation, Bluetooth installation, and other version combinations remain blocked. No native update is hardware-qualified; see the [protocol requirements](protocol.md#authorization-and-hardware-qualification).
 
 ## Choose a package
 
@@ -147,7 +147,7 @@ The first command only checks access configuration. The second requests administ
 
 ## Prepare and install firmware
 
-The desktop app and plugin automatically select the first identified component and loads its matching firmware releases. If multiple components are connected, you can select another one from the device list. Controller and receiver firmware are separate. Manual model browsing remains available, but choosing a model manually does not prove that it matches attached hardware.
+The desktop app and plugin automatically select the first identified component and load its matching firmware releases. If multiple components are connected, you can select another one from the device list. Controller and receiver firmware are separate. Manual model browsing remains available, but choosing a model manually does not prove that it matches attached hardware.
 
 **Prepare firmware** does not write to a device. For vendor firmware it downloads and validates the image. For fwupd it prepares a trusted release plan; fwupd downloads and validates the firmware when installation begins.
 
@@ -186,7 +186,20 @@ The original receiver's installed bootloader bytes have not been fingerprinted. 
 3. Choose **Review installation** and read the experimental evidence, target, and version details.
 4. To start the update, select **Confirm firmware installation**. Keep USB and power connected until the plugin verifies the returning receiver's version. Check normal controller/receiver operation afterward.
 
-Preparation does not start the update. The user's final confirmation does. `QUALIFICATIONS` remains empty; these experimental records do not permit controller updates, radio firmware writes, other source versions, or different images.
+Preparation does not start the update. The user's final confirmation does. `QUALIFICATIONS` remains empty; these receiver records do not permit controller updates, other source versions, or different images. The separate controller authorization is described below.
+
+### Experimental wireless controller update
+
+This route is limited to the Ultimate 2 Wireless controller, stable **1.09 → exact official 1.10**, through an Ultimate 2 receiver running stable **1.06**, with controller edition **1**. Edition is not a reported hardware revision. Preparation fingerprints both components' bootloaders and installed firmware, checks controller battery and commit state, and binds the job to the selected receiver. An older receiver must complete its own eligible USB update first.
+
+1. Connect the receiver to the Deck by USB, directly or through its USB-connected dock. Turn on its paired controller in **2.4 GHz mode** and charge it to at least **30%**. Keep a USB data cable available for recovery.
+2. Scan and select **Ultimate 2 Wireless controller (via receiver)**. Select release **1.10**, then choose **Prepare firmware**. If the controller already runs 1.10, the app reports that no update is needed.
+3. Review the source/destination versions and experimental evidence. Choose **Confirm firmware installation** only for an eligible prepared job.
+4. Keep the controller powered on and the receiver connected until the app verifies the returning controller's version. Check normal controller operation afterward.
+
+Other receivers can remain connected; jobs select and lock the original receiver. Each adapter carries one paired controller. Bluetooth and the controller's direct USB connection are not enabled for normal controller installation. The separate USB rescue operation requires its own confirmation before an erase/reinstall. Newly listed catalog firmware does not become installable until its source/image combination is reviewed.
+
+The controller's bounded USB boot round trip passed on 1.10: boot identity and fingerprint matched, all 145408 application bytes and commit metadata remained unchanged, and the controller returned at 1.10. Complete wireless transfer, activation, USB rescue reinstall, and physical power-loss recovery remain untested. Static analysis identifies **LB+RB held during power-on/USB connection** as a forced recovery entry; that physical button procedure still needs hardware validation. See the [controller recovery contract](devices/ultimate2-controller-recovery.md) before attempting recovery. An interrupted operation must be inspected; do not automatically repeat its installation.
 
 ### Check an interrupted receiver update
 

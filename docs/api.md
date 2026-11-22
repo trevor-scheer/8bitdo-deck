@@ -78,7 +78,7 @@ Call `info` for the supported API/application versions, platform support, capabi
 | `info` | None | Application/API information and operation descriptions; no device probe. |
 | `scan_devices` | None | `{devices, warnings}`; queries allowlisted runtime identities. |
 | `probe_wireless` | None | Bounded identity results for reviewed radio routes on Linux; does not install firmware. |
-| `get_models` | None | Model array, including available fwupd entries. Native models include advisory `download_only`: true when no installation route is enabled for that model on this host. False does not authorize a particular device or firmware image; preparation still checks the exact target and source version. |
+| `get_models` | None | Model array, including available fwupd entries. Native models include advisory `download_only`: true when no installation route is enabled for that model on this host. The optional advisory `wireless_only` field marks a model whose enabled native installation route requires its receiver. False `download_only` or true `wireless_only` does not authorize a device or image; preparation still checks the exact target, host, and source version. |
 | `get_releases` | `model_id` | `{releases: [...]}` for the selected component. |
 | `prepare_update` | `model_id`, `release_id`; optional `device_id` | `{job_id}`; validates the selection and starts preparation. An omitted or empty device ID browses/downloads without identifying hardware. |
 | `get_job` | `job_id` | Public job status, evidence, installation/recovery capabilities, and progress. |
@@ -96,6 +96,16 @@ Call `info` for the supported API/application versions, platform support, capabi
 An operation name cannot select a private service method or invoke a worker directly. Unknown parameters, wrong types, and unsupported API versions are rejected before the operation runs. Installation and recovery confirmations are boolean parameters, not strings or truthy integers.
 
 In the Python API and Decky adapter, `setup_recovery_access` returns immediately. Keep the same API instance alive and poll `get_recovery_access` while `pending` is true. Pending status and authorization errors belong to that instance; a separate process can inspect installed access configuration but cannot track another process's setup prompt. The CLI performs this polling before it exits.
+
+## Wireless device and job results
+
+A controller identified through its receiver has `backend: "wireless"`, model `ultimate2-controller`, and its own `paired-…` device ID. Pass that ID unchanged to `prepare_update`; do not substitute the receiver's `usb-…` ID or construct an ID from USB topology. The receiver remains a separate component with its own firmware releases. A status-only paired entry is not an installation authorization.
+
+Model results can include optional advisory `download_only` and `wireless_only` booleans. A frontend should explain that a wireless-only model must be selected through its receiver. These fields describe model capabilities, not eligibility of a connected device, a particular release, or a host. Treat absent optional fields as unknown and rely on the prepared job's `can_install` result.
+
+Eligible wireless jobs use the existing `prepare_update`, `get_job`, and explicitly confirmed `install_update` operations. On Linux, the reviewed route is stable controller 1.09 → exact official 1.10 through stable receiver 1.06, edition 1, with at least 30% battery and matching installed-code fingerprints. Preparation of an already-current 1.10 controller does not offer reinstallation. Normal direct-USB controller installation and Bluetooth installation are disabled. Catalog discovery of a future release does not create an authorization.
+
+USB controller rescue is a distinct operation from normal wireless installation and requires separate confirmation before erase/reinstall. Display its checked recovery action and evidence; never interpret wireless installation confirmation as blanket recovery permission. See the [controller rescue contract](devices/ultimate2-controller-recovery.md) for protocol and hardware-validation limits.
 
 ## Platform capabilities
 
@@ -118,7 +128,7 @@ Apply requests perform download and verification before returning, so show indet
 
 ## Frontend responsibilities
 
-Display the selected component, source/destination versions, evidence level, and limitations before requesting installation. Preserve the distinction between preparation and firmware installation. When recovery inspection returns `reflash`, disclose that confirmation permits a complete erase/reinstall of the cached image; another recovery action can activate an already committed image by resetting the receiver.
+Display the selected component, source/destination versions, evidence level, and limitations before requesting installation. Preserve the distinction between preparation and firmware installation. When recovery inspection returns `reflash`, disclose that confirmation permits a complete erase/reinstall of the cached image; another recovery action can activate an already committed image by resetting the affected component. Controller USB rescue must retain its separate confirmation and target checks.
 
 Poll `get_job` after submitting a background job. Active states are `queued`, `downloading`, `validating`, `installing`, and `verifying`; terminal presentation depends on `ready`, `blocked`, `failed`, or `complete`. A `ready` job can still fail revalidation when the worker starts. Only `complete` establishes the backend's post-update verification result.
 

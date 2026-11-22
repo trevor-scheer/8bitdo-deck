@@ -2,7 +2,7 @@
 
 A firmware companion for 8BitDo controllers and accessories, with a desktop app for Linux, macOS, and Windows, a standalone CLI, a Python API, and the **8BitDo Deck** frontend for Steam Deck. All frontends use the same backend and firmware policy.
 
-**Early development build.** Discovery, firmware browsing, package validation, and update jobs are implemented. **On Linux, two experimental native receiver updates are available:** Ultimate 2 Wireless 1.01 → official 1.06 and original Ultimate Bluetooth 1.03 → official 1.04. Each requires its exact reviewed image and matching preflight. No native update is hardware-qualified. Controller updates, wireless firmware writes, and other native version combinations remain blocked. No firmware image has been erased, written, or committed during this project's validation.
+**Early development build.** On Linux, three narrowly reviewed experimental updates are available: Ultimate 2 Wireless receiver **1.01 → 1.06**, original Ultimate Bluetooth receiver **1.03 → 1.04**, and Ultimate 2 Wireless controller **1.09 → 1.10 over 2.4 GHz**, through receiver **1.06**, for controller edition **1**. Each requires its exact reviewed image and matching preflight. No native update is hardware-qualified. Normal direct-USB controller installation, Bluetooth installation, and other version combinations remain blocked. No firmware image has been erased, written, or committed during this project's hardware validation.
 
 ## Use it
 
@@ -22,7 +22,8 @@ Install 0.3 manually once if you use 0.2: the older release has no app-update me
 The shared backend provides:
 
 - USB discovery, automatic model selection for identified devices, and separate controller and receiver entries.
-- Firmware version queries for the observed Ultimate Wireless and Ultimate 2 USB personalities. An ambiguous model stays unresolved.
+- Firmware version queries for the observed Ultimate Wireless and Ultimate 2 USB personalities, plus identification of paired Ultimate 2 controllers through their receivers. An ambiguous model stays unresolved.
+- Experimental Ultimate 2 controller updates over 2.4 GHz for the exact reviewed route, with battery checks, complete source fingerprints, staging verification, and a separate USB rescue backend.
 - Official stable releases for Ultimate 2 controller/receiver, Ultimate Bluetooth controller/receiver, and the original Ultimate 2.4G controller/receiver.
 - Bounded HTTPS downloads, exact size and firmware-header checks, local SHA-256 receipts, and explicit provenance limits.
 - Background jobs, native protocol backends, targeted legacy fwupd installation, suspend inhibition, and post-update version checks. Native jobs require a developer-issued authorization.
@@ -38,15 +39,17 @@ The native firmware transactions and hardware observations below apply to Linux/
 | Device or route | Implemented | Hardware validation |
 | --- | --- | --- |
 | Ultimate 2 Wireless receiver, USB `6013` | Discovery/catalog, experimental 1.01 → 1.06 update after matching preflight, recovery helper | Read-only checks passed on 1.06 and 1.01; receiver 1.01 completed boot identity, inspection, reset, and return to unchanged firmware on the same USB port; no firmware update tested |
-| Ultimate 2 Wireless controller | Paired status, bounded radio identity probe, catalog; native writes blocked | Two controllers reported 1.10; radio identity and firmware reads passed through receiver 1.06; no native update or controller recovery tested |
+| Ultimate 2 Wireless controller, 2.4 GHz via receiver | Experimental stable 1.09 → exact 1.10 through receiver 1.06, edition 1; separate confirmed USB rescue | Radio identity/reads passed; controller 1.10 completed USB boot inspection and return with full application and metadata unchanged; complete wireless transfer, rescue reinstall, and physical LB+RB recovery entry untested |
 | Ultimate Bluetooth receiver, shared USB `3109` | Model-tag identification, catalog, experimental 1.03 → 1.04 update, confirmed full-image recovery reinstall | Boot identity, initialization geometry, one existing application-page CRC, and return to 1.03 passed; installed boot bytes, firmware update, and recovery reinstall unvalidated |
 | Original Ultimate Bluetooth controller and 2.4G controller/receiver | Separate firmware catalog entries; legacy model-tag decoder; download/header checks | Firmware files checked; native updates not qualified |
 | Legacy fwupd `ebitdo` devices | Trusted upgrade selection and targeted installation for supported, bootloader-ready devices | Integration tested with simulated responses; no legacy device flashed here |
 | Other 8BitDo products | Unknown devices remain visible; official updater link available | No native support claim |
 
-SteamOS 3.9.5 already grants recovery HID access. Both receiver boot round trips passed as the desktop user without installing rules or requesting administrator access. The Ultimate 2 receiver's complete source application and metadata were unchanged afterward; the original receiver check verified its returning version and one application-page CRC, without fingerprinting its installed bootloader. Firmware flashing, recovery reinstall, pending-image copy, and power-loss recovery remain untested; see the [recovery findings](docs/receiver-recovery.md).
+SteamOS 3.9.5 already grants recovery HID access. Both receiver boot round trips passed as the desktop user without installing rules or requesting administrator access. The Ultimate 2 receiver's complete source application and metadata were unchanged afterward; the original receiver check verified its returning version and one application-page CRC, without fingerprinting its installed bootloader. A controller running 1.10 also completed a USB boot round trip: its bootloader matched the reviewed fingerprint, all 145408 application bytes and metadata remained unchanged, and stable 1.10 returned. Firmware flashing, recovery reinstall, pending-image copy, and power-loss recovery remain untested; see the [receiver recovery findings](docs/receiver-recovery.md) and [controller USB recovery](docs/devices/ultimate2-controller-recovery.md).
 
 For an experimental update, select the receiver and its authorized destination: **Ultimate 2 Wireless 1.01 → 1.06** or **Ultimate Bluetooth 1.03 → 1.04**. Prepare it, review the evidence and limits, then select **Confirm firmware installation** to start. The modern path requires installed-code fingerprints; the original receiver instead requires the reviewed image, model, source version, and boot geometry. See the [installation procedure](docs/install.md#experimental-receiver-updates).
+
+For the controller route, select **Ultimate 2 Wireless controller (via receiver)** while it is connected in 2.4 GHz mode. Charge it to at least 30% and keep a USB data cable available for recovery. An already-current 1.10 controller needs no reinstall. See the [wireless installation procedure](docs/install.md#experimental-wireless-controller-update) and [exact source/image scope](docs/devices/ultimate2-wireless.md). Future catalog releases require review before installation is enabled.
 
 **Prepare firmware does not flash a device.** An image that passes structural checks can still be blocked from installation. Manual model selection never authorizes a hardware write. The vendor's undocumented `md5` field does not match sampled complete files; the app records this without claiming that a locally calculated digest proves authenticity.
 
