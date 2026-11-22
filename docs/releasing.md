@@ -52,9 +52,9 @@ python scripts/smoke_distributions.py --binary out/binary/eightbitdo
 python scripts/package_distributions.py prepare
 ```
 
-Use `out/binary/eightbitdo.exe` on Windows. Keep output directories clean so a wheel glob selects one file. `prepare` collects notices, archives the CLI, and stages the backend in `src-tauri/binaries/` with Tauri's required target-triple suffix.
+Use `out/binary/eightbitdo.exe` on Windows. Keep output directories clean so a wheel glob selects one file. `prepare` collects Python/native-runtime, Rust dependency, and bundled JavaScript notices, archives the CLI, and stages the backend in `src-tauri/binaries/` with Tauri's required target-triple suffix.
 
-Build the desktop for the current host. Replace `BUNDLE` with `appimage` on Linux, `dmg` on macOS, or `nsis` on Windows:
+Build the desktop for the current host. Replace `BUNDLE` with `appimage` on Linux, `app,dmg` on macOS, or `nsis` on Windows:
 
 ```sh
 pnpm exec tauri build --bundles BUNDLE
@@ -64,7 +64,7 @@ python scripts/smoke_desktop.py
 python scripts/package.py
 ```
 
-Tauri runs the desktop Vite build, then bundles the UI and sidecar. Native packages are assembled under `out/release/`; `out/update-inputs/` contains application units for the signing job. The final command creates `out/8bitdo-deck.zip` from the previously built Decky frontend.
+On macOS, request both `app,dmg`: the `.app` must remain available for smoke checks and signed update packaging after the DMG is built. Tauri runs the desktop Vite build, then bundles the UI and sidecar. Native packages are assembled under `out/release/`; `out/update-inputs/` contains application units for the signing job. The final command creates `out/8bitdo-deck.zip` from the previously built Decky frontend.
 
 For UI development, `pnpm run dev:desktop` opens a browser preview without hardware access. After staging a backend, `pnpm exec tauri dev` runs the desktop bridge. Browser tests supply fixtures only in the test harness; the shipped app does not fabricate connected devices.
 
@@ -105,7 +105,7 @@ Do not regenerate a trust root for an ordinary release. Existing installations d
 
 ## Publish through GitHub Actions
 
-1. Update the versions and review support claims, API changes, artwork mappings, and notices. Wait for Checks to pass on the intended source revision.
+1. Update the versions and write reviewed release notes in `docs/releases/VERSION.md`, using the SemVer spelling without `v` (for example, `docs/releases/0.3.0-alpha.1.md`). Review support claims, API changes, artwork mappings, and notices. The release workflow requires this file and uses the same text for GitHub release notes and signed TUF update notes. Wait for Checks to pass on the intended source revision.
 2. Tag that commit and push the tag. Replace `RELEASE_TAG` with its version, such as `v0.3.0-alpha.1`:
 
    ```sh
