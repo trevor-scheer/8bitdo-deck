@@ -5,6 +5,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { preparationAdvice } from "../src/shared/preparation";
 import { DevicePicture } from "../src/shared/DevicePicture";
 import { jobIsActive, progressValue, theme } from "../src/shared/theme";
 import type {
@@ -134,6 +135,7 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
   const locked = busy || active || !!jobError;
   const device = devices.find((item) => item.id === selected.deviceId);
   const model = models.find((item) => item.id === selected.modelId);
+  const preparation = preparationAdvice(model, device, info?.capabilities?.native_write !== false);
   const release = releases.find((item) => item.id === releaseId);
   const canWrite = info?.capabilities?.native_write !== false;
 
@@ -632,9 +634,9 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
             <aside className="details" aria-label="Firmware details">
               <p className="eyebrow">
                 {model?.role === "receiver"
-                  ? "Update receiver"
+                  ? "Receiver firmware"
                   : model?.role === "controller"
-                    ? "Update controller"
+                    ? "Controller firmware"
                     : "Firmware details"}
               </p>
               {model ? (
@@ -706,11 +708,10 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
                     }
                     onClick={prepare}
                   >
-                    Prepare firmware <span aria-hidden="true">↓</span>
+                    {preparation.label} <span aria-hidden="true">↓</span>
                   </button>
                   <p className="fine-print">
-                    Downloads and checks the selected firmware. Nothing is
-                    written to your device.
+                    {preparation.description}
                   </p>
                 </>
               ) : (

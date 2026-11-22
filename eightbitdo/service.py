@@ -22,7 +22,7 @@ from .protocol import (
     parse_firmware, query_identity, verify_authorization_sources,
 )
 from .recovery import finish_recovery, inspect_recovery
-from .qualifications import qualification_for
+from .qualifications import has_native_installation, qualification_for
 from .registry import MODELS, get_model
 
 
@@ -154,7 +154,8 @@ class Service:
         return {"devices": results}
 
     def get_models(self) -> list[dict]:
-        models = [model.public() for model in MODELS]
+        models = [{**model.public(), "download_only": not (self.platform.native_write and has_native_installation(model.firmware_pid))}
+                  for model in MODELS]
         try:
             for device in self.fwupd.devices():
                 models.append({
@@ -292,17 +293,29 @@ class Service:
         job.update(
             state="blocked", progress=100, can_install=False, backend="hid",
             version=image.version, sha256=artifact.sha256, artifact_path=artifact.path,
-            message="Firmware downloaded; model and version headers match. Native installation is awaiting a reviewed update authorization. " + artifact.verification_note + " Firmware on the device is unchanged.",
+            message="Firmware downloaded; model and version headers match. " + artifact.verification_note + " Firmware on the device is unchanged.",
         )
         if self.platform.native_write is False:
             from .hidapi_backend import WRITE_UNAVAILABLE
             job["message"] = "Firmware downloaded and header validated. " + WRITE_UNAVAILABLE + " " + artifact.verification_note
-        elif job["device_id"]:
+        elif not has_native_installation(model.firmware_pid):
+            job["message"] = "Download only. This app does not install firmware on this model yet. " + job["message"]
+        elif not job["device_id"]:
+            job["message"] = "Download only. No identified device was selected. Select a connected device and prepare again to check installation eligibility. " + job["message"]
+        else:
             device = self._native_device(job["device_id"], model.id)
             with self.platform.open_hid(device.hid_paths[0], int(device.pid, 16), self.state_dir / "locks" / (device.id + ".lock"), expected_usb_path=device.usb_path) as transport:
                 identity = query_identity(transport, usb_pid=int(device.pid, 16))
                 authorization = qualification_for(image, identity)
-                if authorization is not None:
+                if not identity.target_verified or identity.product_id != image.product_id:
+                    job["message"] = "Installation unavailable: the connected device does not have a verified matching identity. " + job["message"]
+                elif identity.beta:
+                    job["message"] = "Installation from beta firmware is not supported for this device. " + job["message"]
+                elif identity.version_raw == image.version_raw:
+                    job["message"] = f"This device already has the selected firmware {image.version}. No update is needed. " + job["message"]
+                elif authorization is None:
+                    job["message"] = f"Installation from {identity.version} to {image.version} is not supported for this device and firmware image. " + model.support + " " + job["message"]
+                else:
                     job.update(evidence_level=authorization.evidence_level, evidence=authorization.evidence)
                     if self.recovery_access.status()['configured']:
                         if isinstance(authorization, LegacySourceReviewedAuthorization):

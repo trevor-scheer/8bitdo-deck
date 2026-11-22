@@ -12,6 +12,7 @@ export interface Device {
 }
 
 export interface Model {
+  download_only?: boolean;
   id: string;
   name: string;
   role: string;

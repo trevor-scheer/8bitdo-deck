@@ -55,6 +55,12 @@ LEGACY_SOURCE_REVIEWED_AUTHORIZATIONS: tuple[LegacySourceReviewedAuthorization, 
 )
 
 
+def has_native_installation(product_id: int) -> bool:
+    """Advisory model capability; exact image/device authorization is still required."""
+    records = (*QUALIFICATIONS, *SOURCE_REVIEWED_AUTHORIZATIONS, *LEGACY_SOURCE_REVIEWED_AUTHORIZATIONS)
+    return any(entry.product_id == product_id for entry in records)
+
+
 def qualification_for(image: FirmwareImage, identity: DeviceIdentity) -> FlashAuthorization | None:
     if not identity.target_verified:
         return None

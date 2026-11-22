@@ -6,6 +6,7 @@ import {
   getRecoveryAccess, installUpdate, openOfficialUpdater, prepareUpdate, recoverUpdate, scanDevices, setupRecoveryAccess,
 } from "./api";
 
+import { preparationAdvice } from "./shared/preparation";
 import { DevicePicture } from "./shared/DevicePicture";
 import { theme, progressValue } from "./shared/theme";
 
@@ -126,6 +127,7 @@ function Content() {
 
   const model = models.find((item) => item.id === modelId);
   const device = devices.find((item) => item.id === deviceId);
+  const preparation = preparationAdvice(model, device);
   const release = releases.find((item) => item.id === releaseId);
   const jobActive = !!job && ["queued", "downloading", "validating", "installing", "verifying"].includes(job.state);
 
@@ -296,6 +298,7 @@ function Content() {
         </div>
         <p style={textStyle}>{model.instructions}</p>
         <p style={textStyle}>{model.support}</p>
+        <p style={textStyle}>{preparation.description}</p>
         {!device && <p style={textStyle}>Browsing firmware only. Selecting a model does not confirm that it matches connected hardware.</p>}
         {loadingReleases && <p style={textStyle}>Checking official firmware releases…</p>}
         {!loadingReleases && releases.length === 0 && <p style={textStyle}>No firmware releases are available from this source.</p>}
@@ -312,7 +315,6 @@ function Content() {
         <PanelSectionRow>
           <ButtonItem
             layout="below"
-            description="Checks the selected update without writing firmware."
             disabled={busy || jobActive || loadingReleases || !release?.downloadable}
             onClick={() => void act(async () => {
               const targetId = device?.model_id === modelId && ["identified", "supported"].includes(device.status) ? device.id : "";
@@ -324,7 +326,7 @@ function Content() {
               saveJob(result.job_id);
               setConfirmInstall(false);
             })}
-          >Prepare firmware</ButtonItem>
+          >{preparation.label}</ButtonItem>
         </PanelSectionRow>
       </>}
     </PanelSection>

@@ -388,7 +388,8 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(job["state"], "blocked")
         self.assertFalse(job["can_install"])
 
-    def test_native_worker_is_launched_under_suspend_inhibitor(self):
+    @patch("eightbitdo.platform.user_session_environment", side_effect=lambda env: env)
+    def test_native_worker_is_launched_under_suspend_inhibitor(self, session_environment):
         job = self.native_job()
         with patch("eightbitdo.platform.shutil.which", side_effect=lambda name: "/usr/bin/" + name), \
                 patch("eightbitdo.platform.subprocess.Popen") as spawn:
@@ -410,7 +411,8 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("--mode=block", command)
         self.assertTrue(spawn.call_args.kwargs["start_new_session"])
 
-    def test_fwupd_install_worker_uses_protected_user_manager_launch(self):
+    @patch("eightbitdo.platform.user_session_environment", side_effect=lambda env: env)
+    def test_fwupd_install_worker_uses_protected_user_manager_launch(self, session_environment):
         job = self.job()
         job.update(backend="fwupd", device_id="fwupd-fixture", model_id="fwupd-fixture")
         with patch("eightbitdo.platform.shutil.which", side_effect=lambda name: "/usr/bin/" + name), \
@@ -432,7 +434,8 @@ class ServiceTests(unittest.TestCase):
                 self.service._spawn(job, "install")
         spawn.assert_not_called()
 
-    def test_user_manager_rejection_preserves_log_and_fails_job_without_worker(self):
+    @patch("eightbitdo.platform.user_session_environment", side_effect=lambda env: env)
+    def test_user_manager_rejection_preserves_log_and_fails_job_without_worker(self, session_environment):
         job = self.native_job()
         launcher = self.root / "reject-launch"
         launcher.write_text("#!/bin/sh\nprintf 'User manager rejected start\\n' >&2\nexit 1\n")
