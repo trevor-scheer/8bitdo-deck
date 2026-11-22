@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
+from dataclasses import dataclass
 
 from .protocol import (
     BLOCK_SIZE, HEADER, DeviceIdentity, FirmwareImage, FirmwareMismatch, FlashResult,
@@ -23,6 +24,15 @@ APPLICATION_BASE = 0x5000
 METADATA_BASE = 0x31000
 STAGING_BASE = 0x32000
 READ_LIMIT = 0x5E000
+
+
+class DamagedControllerMetadata(ProtocolError):
+    """Reset-only inspection cannot accept this record; explicit rescue can."""
+
+
+@dataclass(frozen=True)
+class ControllerRecoveryStatus(RecoveryStatus):
+    expected_version_raw: int | None = None
 
 
 def _request(command: int, *, length: int = 0, offset: int = 0) -> bytes:
@@ -48,6 +58,11 @@ def _read(transport: ReportTransport, address: int, length: int) -> bytes:
         _exchange(transport, 5, length=min(32, length - position), offset=address + position)
         for position in range(0, length, 32)
     )
+
+
+def query_controller_boot_target(transport: ReportTransport) -> int:
+    """Ask a validated 3208 boot interface its target, without reading flash."""
+    return int.from_bytes(_exchange(transport, 8, length=2), "little")
 
 
 def _bootable_application(data: bytes) -> bool:
@@ -90,7 +105,7 @@ def _inspect_boot(
     *, allow_damaged_metadata: bool = False,
 ):
     boot, source = _validate_policy(image, authorization)
-    if _exchange(transport, 8, length=2) != b"\x12\x60":
+    if query_controller_boot_target(transport) != 0x6012:
         raise FirmwareMismatch("Boot product identity is not the reviewed controller")
     if hashlib.sha256(_read(transport, boot.address, boot.length)).hexdigest() != boot.sha256:
         raise FirmwareMismatch("Controller bootloader does not match the reviewed fingerprint")
@@ -98,7 +113,7 @@ def _inspect_boot(
     erased = metadata == b"\xff" * 52
     valid = not erased and crc16(metadata[:48]) == struct.unpack_from("<I", metadata, 48)[0]
     if not erased and not valid and not allow_damaged_metadata:
-        raise ProtocolError("Controller commit metadata is damaged; recovery is blocked")
+        raise DamagedControllerMetadata("Controller commit metadata is damaged; reset-only recovery is blocked")
     pending = valid and struct.unpack_from("<I", metadata, 24)[0] == 0xAEB14D6C
     return source, metadata, pending
 
@@ -116,13 +131,16 @@ def inspect_controller_recovery(
         rounded = (length + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE
         if _read(transport, staging, rounded) != image.payload + b"\xff" * (rounded - length):
             raise FirmwareMismatch("Controller pending image or sector padding differs from authorized bytes")
-        return RecoveryStatus("finish-pending", "Verified controller staging can be replayed by the vendor bootloader")
+        return ControllerRecoveryStatus("finish-pending", "Verified controller staging can be replayed by the vendor bootloader",
+                                        expected_version_raw=image.version_raw & 0xFFFF)
     installed = _read(transport, source.address, source.length)
     if hashlib.sha256(installed).hexdigest() == source.sha256 and _bootable_application(installed):
-        return RecoveryStatus("return-installed", "Reviewed controller source image and both checksums remain intact")
+        return ControllerRecoveryStatus("return-installed", "Reviewed controller source image and both checksums remain intact",
+                                        expected_version_raw=int.from_bytes(installed[2:6], "little"))
     target = _read(transport, APPLICATION_BASE, len(image.payload))
     if target == image.payload and _bootable_application(target):
-        return RecoveryStatus("return-installed", "Authorized controller target and both checksums are installed")
+        return ControllerRecoveryStatus("return-installed", "Authorized controller target and both checksums are installed",
+                                        expected_version_raw=image.version_raw & 0xFFFF)
     return RecoveryStatus("blocked", "No intact reviewed controller application or verified pending image")
 
 
