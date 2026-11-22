@@ -5,10 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "eightbitdo-updater"
 dynamic = ["version"]
-description = "Shared 8BitDo firmware updater for Linux, with CLI and Decky frontends"
+description = "8BitDo firmware updater with desktop, CLI, and Decky frontends"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "tufup==0.10.0",
+    "hidapi==0.15.0; sys_platform == 'darwin' or sys_platform == 'win32'",
+    "portalocker[win32]==4.4.2; sys_platform == 'win32'",
+    "psutil==7.2.2",
+    "platformdirs==4.14.8; sys_platform == 'darwin' or sys_platform == 'win32'",
+]
 
 [project.scripts]
 eightbitdo = "eightbitdo.cli:main"
@@ -22,7 +28,7 @@ Issues = "https://github.com/trevor-scheer/8bitdo-deck/issues"
 version = {attr = "eightbitdo.__version__"}
 
 [tool.setuptools.package-data]
-eightbitdo = ["resources/*.sh", "py.typed"]
+eightbitdo = ["resources/*.sh", "resources/*.json", "py.typed"]
 
 [tool.setuptools.packages.find]
 include = ["eightbitdo*"]

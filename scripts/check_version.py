@@ -5,6 +5,7 @@ import ast
 import json
 from pathlib import Path
 import re
+import tomllib
 
 from packaging.version import Version
 
@@ -17,6 +18,11 @@ def project_version(root: Path) -> Version:
     version = Version(value)
     if Version(json.loads((root / "package.json").read_text())["version"]) != version:
         raise ValueError("Python and Decky versions differ")
+    if (root / "src-tauri/tauri.conf.json").exists():
+        desktop = json.loads((root / "src-tauri/tauri.conf.json").read_text())["version"]
+        rust = tomllib.loads((root / "src-tauri/Cargo.toml").read_text())["package"]["version"]
+        if Version(desktop) != version or Version(rust) != version:
+            raise ValueError("Python, desktop, and Rust package versions differ")
     return version
 
 

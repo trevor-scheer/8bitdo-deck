@@ -18,12 +18,19 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-24.04
+    concurrency:
+      group: application-update-metadata
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: updates
+          path: update-metadata
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -37,14 +44,35 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: update-inputs-*
+          merge-multiple: true
+          path: update-inputs
+      - name: Sign application updates with tufup
+        env:
+          EIGHTBITDO_TUF_SIGNING_KEYS: ${{ secrets.EIGHTBITDO_TUF_SIGNING_KEYS }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python scripts/publish_updates.py prepare --metadata-checkout update-metadata --inputs update-inputs --release-assets release-assets --tag "$RELEASE_TAG"
+      - name: Retain prepared public metadata for publication recovery
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepared-update-metadata
+          path: update-metadata/*/metadata/*.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Check complete release and calculate checksums
         working-directory: release-assets
         run: |
-          test "$(find . -maxdepth 1 -name 'eightbitdo-updater-*-linux-*.tar.gz' | wc -l)" -eq 2
+          test "$(find . -maxdepth 1 -name 'eightbitdo-updater-*' | wc -l)" -eq 5
+          test "$(find . -maxdepth 1 -name '8BitDo-Updater_*' | wc -l)" -eq 6
+          test "$(find . -maxdepth 1 -name 'eightbitdo-cli-*.tar.gz' | wc -l)" -eq 5
+          test "$(find . -maxdepth 1 -name 'eightbitdo-desktop-*.tar.gz' | wc -l)" -eq 5
           test "$(find . -maxdepth 1 -name '*.whl' | wc -l)" -eq 1
           test "$(find . -maxdepth 1 -name 'eightbitdo_updater-*.tar.gz' | wc -l)" -eq 1
           test -s 8bitdo-deck.zip
-          sha256sum ./*.tar.gz ./*.whl 8bitdo-deck.zip > SHA256SUMS
+          find . -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > ../SHA256SUMS
+          mv ../SHA256SUMS SHA256SUMS
           sha256sum --check SHA256SUMS
       - uses: actions/attest@v4
         id: provenance
@@ -68,6 +96,14 @@ jobs:
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes --title "8BitDo Updater $RELEASE_TAG"
           fi
+      - name: Publish metadata after immutable release downloads are available
+        working-directory: update-metadata
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- '*/metadata/*.json'
+          git commit -m 'publish signed application update metadata'
+          git push origin HEAD:updates
           gh release upload "$RELEASE_TAG" release-assets/* --clobber
           if [[ "$RELEASE_TAG" == *-* ]]; then
             gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false

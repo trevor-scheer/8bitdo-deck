@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 import venv
@@ -84,8 +85,8 @@ def main():
             command = [str(args.binary.resolve())]
             environment["PATH"] = str(root / "no-external-python")
         else:
-            venv.EnvBuilder(with_pip=True).create(root / "venv")
-            python = str(root / "venv/bin/python")
+            venv.EnvBuilder(with_pip=True, system_site_packages=True).create(root / "venv")
+            python = str(root / ("venv/Scripts/python.exe" if sys.platform == "win32" else "venv/bin/python"))
             subprocess.run([python, "-I", "-m", "pip", "install", "--no-index", "--no-deps",
                             str(args.wheel.resolve())], cwd=root, env=environment, check=True, timeout=60)
             subprocess.run([python, "-I", "-c", "from importlib.resources import files; "

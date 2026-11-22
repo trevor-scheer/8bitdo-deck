@@ -7,7 +7,7 @@ a = Analysis(
     [str(root / "packaging/entrypoint.py")],
     pathex=[str(root)],
     binaries=[],
-    datas=collect_data_files("eightbitdo", includes=["resources/*.sh"]),
+    datas=collect_data_files("eightbitdo", includes=["resources/*.sh", "resources/*.json"]),
     hiddenimports=collect_submodules("eightbitdo"),
     hookspath=[],
     runtime_hooks=[],

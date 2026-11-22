@@ -9,3 +9,8 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 .DS_Store
+src-tauri/target/
+src-tauri/binaries/
+desktop/dist/
+playwright-report/
+test-results/
