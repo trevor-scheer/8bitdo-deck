@@ -144,6 +144,7 @@ def install_wireless(service, job: dict) -> None:
                 or authorization.controller.evidence != job.get("evidence")):
             raise FirmwareMismatch("The wireless target or authorization changed. Prepare and review the update again.")
         job.update(state="installing", progress=0, can_install=False, recovery_ready=False,
+                   wireless_install_attempted=True,
                    message="Installing controller firmware over 2.4 GHz. Keep the controller powered on and the receiver connected by USB.")
         # Source identity and receiver port were persisted by preparation; this
         # durable transition also precedes initialization and every flash write.

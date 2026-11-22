@@ -231,17 +231,20 @@ class RecoveryServiceTests(unittest.TestCase):
             self.service.run_recover(queued)
 
     def test_recovery_worker_requires_suspend_inhibitor(self):
-        with patch('eightbitdo.platform.shutil.which', side_effect=lambda name: '/usr/bin/' + name), \
-                patch('eightbitdo.platform.user_session_environment', side_effect=lambda env: env), \
-                patch('eightbitdo.platform.subprocess.Popen') as start:
-            self.service._spawn(self.job, 'recover')
-        command = start.call_args.args[0]
-        self.assertEqual(command[0], '/usr/bin/systemd-run')
-        self.assertIn('--user', command)
-        self.assertIn('/usr/bin/systemd-inhibit', command)
-        self.assertTrue(any(value.startswith('--setenv=PYTHONPATH=') for value in command))
-        self.assertEqual(command[-1], 'recover')
-        self.assertIn('--what=sleep', command)
+        for backend in ('hid', 'wireless'):
+            self.job['backend'] = backend
+            with self.subTest(backend=backend), \
+                    patch('eightbitdo.platform.shutil.which', side_effect=lambda name: '/usr/bin/' + name), \
+                    patch('eightbitdo.platform.user_session_environment', side_effect=lambda env: env), \
+                    patch('eightbitdo.platform.subprocess.Popen') as start:
+                self.service._spawn(self.job, 'recover')
+                command = start.call_args.args[0]
+                self.assertEqual(command[0], '/usr/bin/systemd-run')
+                self.assertIn('--user', command)
+                self.assertIn('/usr/bin/systemd-inhibit', command)
+                self.assertTrue(any(value.startswith('--setenv=PYTHONPATH=') for value in command))
+                self.assertEqual(command[-1], 'recover')
+                self.assertIn('--what=sleep', command)
         with patch('eightbitdo.platform.shutil.which', return_value=None), \
                 patch('eightbitdo.platform.subprocess.Popen') as start:
             with self.assertRaises(RuntimeError):

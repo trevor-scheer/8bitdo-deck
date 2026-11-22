@@ -180,7 +180,7 @@ class Service:
         self.store.path(job["id"])
         launch = self.platform.worker_launch(
             self.state_dir, job["id"], action,
-            inhibit=action == "install" or (action == "recover" and job.get("backend") == "hid"),
+            inhibit=action == "install" or (action == "recover" and job.get("backend") in {"hid", "wireless"}),
         )
         job["worker_action"] = action
         job["worker_pid"] = None
@@ -435,6 +435,9 @@ class Service:
         self._save_progress(job)
 
     def _recovery_context(self, job: dict, *, queued: bool = False):
+        if job.get("backend") == "wireless":
+            from .controller_recovery_service import recovery_context
+            return recovery_context(self, job, queued=queued)
         states = {"queued"} if queued else {"failed", "blocked"}
         if (
             job.get("state") not in states or job.get("backend") != "hid"
@@ -532,6 +535,10 @@ class Service:
         self.platform.require_write_support()
         with self.store.lock(job_id):
             job = self.store.read(job_id)
+            if job.get("backend") == "wireless":
+                from .controller_recovery_service import check_recovery
+                check_recovery(self, job)
+                return self._public_recovery_job(job)
             image, authorization = self._recovery_context(job)
             job.update(recovery_ready=False, recovery_action=None, can_install=False)
             self.store.save(job)
@@ -570,11 +577,13 @@ class Service:
             _, authorization = self._recovery_context(job)
             if not self.recovery_access.status()["configured"]:
                 raise ValueError("Configure receiver recovery access before recovering firmware.")
-            actions = {"reflash"} if isinstance(authorization, LegacySourceReviewedAuthorization) else {"finish-pending", "return-installed"}
+            actions = ({"reflash", "finish-pending", "return-installed"} if job.get("backend") == "wireless"
+                       else {"reflash"} if isinstance(authorization, LegacySourceReviewedAuthorization)
+                       else {"finish-pending", "return-installed"})
             if job.get("recovery_ready") is not True or job.get("recovery_action") not in actions:
                 raise ValueError("Run a successful recovery check before confirming recovery.")
             job.update(state="queued", recovery_ready=False, recovery_confirmed=True, can_install=False,
-                       progress=0, message="Starting confirmed recovery. Keep the receiver connected.")
+                       progress=0, message="Starting confirmed recovery. Keep the device connected by USB.")
             self._spawn(job, "recover")
             return public_job(job)
 
@@ -582,6 +591,10 @@ class Service:
         self.platform.require_write_support()
         if job.get("worker_action") != "recover" or job.get("recovery_confirmed") is not True:
             raise ValueError("This job has no confirmed recovery request.")
+        if job.get("backend") == "wireless":
+            from .controller_recovery_service import run_recover
+            run_recover(self, job)
+            return
         image, authorization = self._recovery_context(job, queued=True)
         if not self.recovery_access.status()["configured"]:
             raise ValueError("Configure receiver recovery access before recovering firmware.")
