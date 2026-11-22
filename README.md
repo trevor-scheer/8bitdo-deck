@@ -1,14 +1,20 @@
-# 8BitDo Deck
+# 8BitDo Updater
 
-A Decky plugin and Linux command-line tool for 8BitDo firmware on Steam Deck.
+A shared Linux firmware updater for 8BitDo controllers and accessories, with a standalone command-line application, a Python API, and the **8BitDo Deck** Decky frontend.
 
 **Early development build.** Discovery, firmware browsing, package validation, and update jobs are implemented. **Two experimental native receiver updates are available:** Ultimate 2 Wireless 1.01 → official 1.06 and original Ultimate Bluetooth 1.03 → official 1.04. Each requires its exact reviewed image and matching preflight. No native update is hardware-qualified. Controller updates, wireless firmware writes, and other native version combinations remain blocked. No firmware image has been erased, written, or committed during this project's validation.
 
 ## Use it
 
-Follow the [installation guide](docs/install.md) to build the plugin or download a ZIP from a successful [Checks run](https://github.com/trevor-scheer/8bitdo-deck/actions/workflows/checks.yml). Install the inner `8bitdo-deck.zip` through Decky's developer settings.
+Download a package from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases):
 
-The plugin provides:
+- **Standalone Linux executable:** use the command line without installing Python or Decky. Choose the binary for your CPU architecture.
+- **Python wheel or source distribution:** integrate the shared backend into another application, or install the CLI in a Python environment.
+- **`8bitdo-deck.zip`:** use the same backend through Decky's Gaming Mode interface.
+
+Follow the [installation guide](docs/install.md) for requirements, package verification, and setup. The executable targets Linux; macOS and Windows device backends are not implemented. The repository and Decky plugin retain the `8bitdo-deck` name.
+
+The shared backend provides:
 
 - USB discovery, automatic model selection for identified devices, and separate controller and receiver entries.
 - Firmware version queries for the observed Ultimate Wireless and Ultimate 2 USB personalities. An ambiguous model stays unresolved.
@@ -16,7 +22,7 @@ The plugin provides:
 - Bounded HTTPS downloads, exact size and firmware-header checks, local SHA-256 receipts, and explicit provenance limits.
 - Background jobs, native protocol backends, targeted legacy fwupd installation, suspend inhibition, and post-update version checks. Native jobs require a developer-issued authorization.
 - Automatic recognition of SteamOS recovery USB access, without terminal commands or administrator setup. Other Linux systems can use a scoped installer through the normal administrator prompt.
-- A launcher for the official WebHID updater in Chrome, plus sanitized diagnostic exports.
+- Sanitized diagnostic exports and a launcher for the official web updater. Website support and WebHID-capable browser availability vary by model and host.
 
 The dock is not assumed to be a separate firmware target. Its receiver has its own firmware.
 
@@ -37,20 +43,25 @@ For an experimental update, select the receiver and its authorized destination: 
 
 **Prepare firmware does not flash a device.** An image that passes structural checks can still be blocked from installation. Manual model selection never authorizes a hardware write. The vendor's undocumented `md5` field does not match sampled complete files; the app records this without claiming that a locally calculated digest proves authenticity.
 
-## Command line
+## Command line and API
 
-The backend requires Python 3.11 or later and has no third-party Python dependencies. From the repository root:
+With the standalone executable or Python package installed, run:
 
 ```sh
-python3 -m eightbitdo scan
-python3 -m eightbitdo probe-wireless
-python3 -m eightbitdo models
-python3 -m eightbitdo releases ultimate2-receiver
-python3 -m eightbitdo prepare ultimate2-receiver RELEASE_ID
-python3 -m eightbitdo job JOB_ID
+eightbitdo --help
+eightbitdo --version
+eightbitdo scan
+eightbitdo models
+eightbitdo releases ultimate2-receiver
+eightbitdo prepare ultimate2-receiver RELEASE_ID
+eightbitdo job JOB_ID
 ```
 
-Replace `RELEASE_ID` with an ID returned by `releases` and `JOB_ID` with the ID returned by `prepare`. Use `--help` for diagnostics and the qualified fwupd installation path. State is stored under `~/.local/state/eightbitdo-deck/` by default.
+Replace `RELEASE_ID` with an ID returned by `releases` and `JOB_ID` with the ID returned by `prepare`. Add `--device-id DEVICE_ID` to preparation to bind it to an identified device from `scan`; preparation without a device browses/downloads only. Installation still requires an eligible job and explicit confirmation.
+
+The Python package requires Python 3.11 or later; the standalone executable includes its interpreter. `python3 -m eightbitdo` and the installed `eightbitdo-deck` command remain available. All frontends share the existing `~/.local/state/eightbitdo-deck/` state directory by default, including device locks and update jobs.
+
+Use the [public API](docs/api.md) to build another frontend. See the [architecture](docs/architecture.md) for the boundary between firmware logic, Linux services, and the CLI/Decky adapters. No network daemon is required.
 
 ## Development
 
@@ -65,6 +76,6 @@ pnpm run test:ui
 python3 scripts/package.py
 ```
 
-See the [wireless update findings](docs/wireless-updates.md), [implementation plan](docs/plan.md), [protocol and authorization requirements](docs/protocol.md), [original receiver protocol](docs/legacy-receiver-protocol.md), [catalog trust boundaries](docs/catalog.md), and [research](docs/research.md).
+See the [release procedure](docs/releasing.md), [wireless update findings](docs/wireless-updates.md), [implementation plan](docs/plan.md), [protocol and authorization requirements](docs/protocol.md), [original receiver protocol](docs/legacy-receiver-protocol.md), [catalog trust boundaries](docs/catalog.md), and [research](docs/research.md).
 
 This is an independent project and is not affiliated with 8BitDo. Broad compatibility is the long-term goal; each additional device family requires its own evidence.

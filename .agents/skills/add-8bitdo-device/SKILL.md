@@ -1,6 +1,6 @@
 ---
 name: add-8bitdo-device
-description: Research, implement, validate, and prepare upstream support for an additional 8BitDo controller, receiver, or accessory in 8BitDo Deck. Also use when extending an existing family's reviewed firmware versions. Covers discovery-only contributions through explicitly authorized hardware update validation.
+description: Research, implement, validate, and prepare upstream support for an additional 8BitDo controller, receiver, or accessory in 8BitDo Updater. Also use when extending an existing family's reviewed firmware versions. Covers discovery-only contributions through explicitly authorized hardware update validation.
 ---
 
 # Add 8BitDo device support
@@ -64,15 +64,17 @@ Use the repository's existing boundaries:
 
 | Concern | Files to inspect/change as needed |
 | --- | --- |
+| Public frontend contract | `eightbitdo/api.py`; see [API reference](../../../docs/api.md) |
 | Model and component catalog | `eightbitdo/registry.py`, `catalog.py` |
 | Discovery and identity | `eightbitdo/discovery.py`, `protocol.py`, `transport.py` |
 | Family-specific transactions | `protocol.py`, `legacy_protocol.py`, `wireless.py`, or a separate module for incompatible semantics |
 | Reconnect and recovery | `connection.py`, `recovery.py`, `access.py` |
+| Linux host integration | `eightbitdo/platform.py`, `runtime.py`; see [architecture](../../../docs/architecture.md) |
 | Durable jobs and workers | `service.py`, `jobs.py`, `worker.py` |
 | Reviewed write policy | `qualifications.py` and the applicable authorization type |
 | Contributor/user behavior | `src/api.ts`, `src/index.tsx`, `main.py`, `cli.py`, support and install docs |
 
-Do not extend receiver-specific service/recovery allowlists to a controller without implementing and testing that controller's policy. For native implementations, preserve these invariants (the existing `fwupd` route instead relies on its supported-device and trusted-release policy):
+Implement firmware behavior in the shared backend so the CLI, Python API, and Decky use the same policy. Keep host-specific behavior at the platform boundary; packaging a binary does not establish support for another OS. Do not extend receiver-specific service/recovery allowlists to a controller without implementing and testing that controller's policy. For native implementations, preserve these invariants (the existing `fwupd` route instead relies on its supported-device and trusted-release policy):
 
 - Match the opened HID descriptor, USB identity, and original physical port. Requery the firmware target before mutation and require stable source-version/revision compatibility.
 - Validate the unchanged cached image and exact compiled authorization again in the worker. UI choices and downloaded metadata cannot create authorizations. Preserve the experimental versus hardware-validated evidence label.

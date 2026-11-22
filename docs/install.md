@@ -1,6 +1,59 @@
-# Install 8BitDo Deck
+# Install 8BitDo Updater
 
-8BitDo Deck is an early development build. It can discover devices, browse official firmware, prepare updates, and open the official web updater. Legacy installation through fwupd requires a supported 8BitDo device already in bootloader mode and a unique, trusted upgrade release. Two source-reviewed experimental native updates are enabled after matching preflight: Ultimate 2 Wireless receiver stable 1.01 → official 1.06 and original Ultimate Bluetooth receiver stable 1.03 → official 1.04. Each permits only its exact reviewed image. Native controller, wireless, and other version combinations remain blocked. No native update is hardware-qualified; see the [protocol requirements](protocol.md#authorization-and-hardware-qualification).
+8BitDo Updater shares its backend between a standalone Linux CLI, a Python API, and the 8BitDo Deck Decky plugin. Choose one or more frontends; their firmware compatibility checks, jobs, locks, and recovery rules are the same.
+
+This is an early development build. Legacy installation through fwupd requires a supported 8BitDo device already in bootloader mode and a unique, trusted upgrade release. Two source-reviewed experimental native updates are enabled after matching preflight: Ultimate 2 Wireless receiver stable 1.01 → official 1.06 and original Ultimate Bluetooth receiver stable 1.03 → official 1.04. Each permits only its exact reviewed image. Native controller, wireless, and other version combinations remain blocked. No native update is hardware-qualified; see the [protocol requirements](protocol.md#authorization-and-hardware-qualification).
+
+## Linux requirements
+
+The native executable includes Python; the Python package requires Python 3.11 or later. Neither standalone route requires Decky. macOS and Windows hardware access is not implemented.
+
+Release executables are built on Ubuntu 22.04 for x86-64 and ARM64 and require glibc 2.35 or later. Steam Deck uses the x86-64 package. These are Linux executables bundled with Python, not fully static binaries; musl-based systems such as Alpine are outside this binary compatibility target. HTTPS catalog access and downloads use the host's trusted CA certificates.
+
+Run the updater as your normal desktop user. Device operations require access to the relevant Linux HID nodes. Native installation and recovery also require a working systemd user manager, `systemd-run`, and `systemd-inhibit` so the worker can prevent suspend. Those operations fail before writing if the required launcher is unavailable. The bundled executable does not replace these host services.
+
+`fwupd` is optional and supplies its own supported-device path and authorization policy. The official web updater needs a compatible browser; the website is not a universal recovery fallback. Receiver recovery access is described [below](#receiver-recovery-access).
+
+## Install the standalone executable
+
+1. Download the matching archive and `SHA256SUMS` from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases). Use `uname -m` to check the host architecture: `x86_64` uses the x86-64 archive and `aarch64` uses ARM64.
+2. Check the downloaded archive against the release checksums. The command below verifies the files present in the current directory:
+
+   ```sh
+   sha256sum --check --ignore-missing SHA256SUMS
+   ```
+
+3. Extract the archive. For the 0.2.0 alpha x86-64 package:
+
+   ```sh
+   tar -xzf eightbitdo-updater-0.2.0a1-linux-x86_64.tar.gz
+   ```
+
+4. Enter the extracted directory and check the executable:
+
+   ```sh
+   cd eightbitdo-updater-0.2.0a1-linux-x86_64
+   ./eightbitdo --version
+   ./eightbitdo info
+   ```
+
+   These commands do not probe hardware. Keep the accompanying notices and license files when redistributing the archive.
+
+The archive's executable can be installed in a user-owned directory on your `PATH`; it does not require an administrator installer. Keep it at a stable path while jobs are running. The [release procedure](releasing.md#verify-a-release-download) also describes verification of the GitHub build attestation. A checksum proves that the downloaded bytes match the manifest; it does not by itself authenticate the publisher or prove that a firmware update is safe.
+
+## Install the Python package
+
+Download the wheel from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases). Create an isolated environment and install it:
+
+```sh
+python3 -m venv ~/.local/share/eightbitdo-venv
+~/.local/share/eightbitdo-venv/bin/python -m pip install ./WHEEL_FILE
+~/.local/share/eightbitdo-venv/bin/eightbitdo --version
+```
+
+Replace `WHEEL_FILE` with the downloaded `eightbitdo_updater-…-py3-none-any.whl` filename. Activate that environment or use its full executable path for later commands. The distribution name is `eightbitdo-updater`; the Python import remains `eightbitdo`. The `eightbitdo-deck` executable remains an alias for existing users.
+
+For development, install the checkout with `python3 -m pip install -e .` inside a virtual environment. `python3 -m eightbitdo` uses that interpreter's installed package or the local checkout. The package includes its permission helper; a source checkout is not required for recovery setup.
 
 ## Get the plugin
 
@@ -17,7 +70,7 @@ python3 scripts/package.py
 
 The package is `out/8bitdo-deck.zip`. The packaging script uses an explicit file list and fixed ZIP metadata, then imports and initializes the packaged Python backend in an isolated temporary directory. It excludes firmware downloads, diagnostics, development dependencies, and frontend source maps.
 
-Alternatively, download the **8bitdo-deck** artifact from a successful [Checks workflow run](https://github.com/trevor-scheer/8bitdo-deck/actions/workflows/checks.yml). GitHub wraps artifacts in another ZIP: extract that download and use the inner `8bitdo-deck.zip` for installation.
+Alternatively, download `8bitdo-deck.zip` from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases). Development packages are also available from successful [Checks workflow runs](https://github.com/trevor-scheer/8bitdo-deck/actions/workflows/checks.yml). GitHub wraps workflow artifacts in another ZIP: extract that download and use the inner `8bitdo-deck.zip` for installation.
 
 ## Install through Decky
 
@@ -33,7 +86,7 @@ The [Decky developer settings implementation](https://github.com/SteamDeckHomebr
 
 The plugin runs as the desktop user and does not request Decky's root flag. It does not disable SteamOS's read-only system partition or install broad USB permission rules. Native fwupd operations use the system service and may require authorization under its policy. If a HID device cannot be opened, the plugin reports that limitation instead of changing system permissions.
 
-### Receiver recovery access
+## Receiver recovery access
 
 On normal SteamOS, no terminal command or administrator setup is needed. The plugin recognizes the existing trusted SteamOS policy and checks actual device access. On the tested SteamOS 3.9.5 system, the root-owned `70-steam-jupiter-input.rules` already grants HID access to the active local user. Opening and closing the receiver's recovery interface as the desktop user succeeded without installing rules. The plugin still runs without Decky's root flag.
 
@@ -47,11 +100,31 @@ The fallback installer uses `pkexec` and adds rules only for USB vendor `2dc8`, 
 
 To remove the fallback rules, run the installer with `--uninstall`, then reconnect the receivers. Removing the Decky plugin alone does not remove those rules. This does not remove SteamOS's own policy.
 
+The standalone CLI exposes the same access policy and setup:
+
+```sh
+eightbitdo recovery-access
+eightbitdo setup-recovery-access --confirm
+```
+
+The first command only checks access configuration. The second requests administrator authorization for the scoped permission setup; it does not flash firmware. Inspect its returned status and run `recovery-access` again to check whether setup completed.
+
 ## Prepare and install firmware
 
 The plugin automatically selects the first identified component and loads its matching firmware releases. If multiple components are connected, you can select another one from the device list. Controller and receiver firmware are separate. Manual model browsing remains available, but choosing a model manually does not prove that it matches attached hardware.
 
 **Prepare firmware** does not write to a device. For vendor firmware it downloads and validates the image. For fwupd it prepares a trusted release plan; fwupd downloads and validates the firmware when installation begins.
+
+The equivalent standalone workflow is:
+
+```sh
+eightbitdo scan
+eightbitdo releases MODEL_ID
+eightbitdo prepare MODEL_ID RELEASE_ID --device-id DEVICE_ID
+eightbitdo job JOB_ID
+```
+
+Use identifiers returned by the preceding commands. Preparation runs in the background, so poll `job` until it leaves an active state. Review its target, version, evidence, and `can_install` result. To start an eligible update after that review, run `eightbitdo install JOB_ID --confirm`, then poll `job` through reconnect verification. Omitting `--device-id` prepares a download without an identified hardware target and cannot authorize installation.
 
 The plugin offers **Review installation** only when the backend authorizes the prepared update. Native jobs require a matching developer-issued authorization and verified recovery access. Review the target, version, and evidence level, then select **Confirm firmware installation**. A source-reviewed experimental update has not been hardware-qualified. Keep the USB connection and power stable until the plugin reports verification complete.
 
@@ -59,7 +132,7 @@ Background jobs continue when the sidebar closes; reopening the plugin restores 
 
 The fwupd route preserves the system service's authorization and configured reporting policies. A device whose identity changes after leaving the bootloader may need a manual rescan; the app does not declare success solely because the install command exited successfully.
 
-**Open official updater** launches the vendor website in the Google Chrome Flatpak installed through Discover. Website support varies by model: the Ultimate Bluetooth receiver (`6008`) appears in its firmware catalog but has no update route in the inspected web implementation. This button is not a validated fallback for every detected device. Chrome's USB access and any vendor-specific connection instructions may need setup in Desktop Mode; the plugin does not automatically change those permissions. A validated firmware download with a blocked installation state is not a completed device update.
+**Open official updater** prefers the installed Google Chrome Flatpak, then falls back to the desktop's `xdg-open` browser handler. The fallback browser may not support WebHID. Website support varies by model: the Ultimate Bluetooth receiver (`6008`) appears in its firmware catalog but has no update route in the inspected web implementation. This button is not a validated fallback for every detected device. Browser USB access and any vendor-specific connection instructions may need setup in Desktop Mode; the updater does not automatically change those permissions. A validated firmware download with a blocked installation state is not a completed device update.
 
 ### Experimental receiver updates
 
@@ -92,8 +165,14 @@ Both actions run under the update/device locks with suspend inhibition and repea
 
 Keep USB and power connected. The two successful bounded boot round trips sent no erase, image write, or commit; they do not validate interrupted-write recovery or power-loss safety. See the [recovery contract and evidence limits](receiver-recovery.md).
 
-## Diagnose or remove the plugin
+From the CLI, use `eightbitdo check-recovery JOB_ID` for inspection. Read the reported action before running `eightbitdo recover JOB_ID --confirm`. The confirmation can authorize a reset or complete erase/reinstall, depending on the receiver and its checked state. Keep using the original job; creating another prepared download does not authorize recovery.
+
+## State, diagnostics, and removal
 
 Use **Export diagnostics** to save the discovered device information and warnings. The plugin displays the saved path. Runtime state normally lives in `~/.local/state/eightbitdo-deck/`, or under `$XDG_STATE_HOME/eightbitdo-deck/` if that variable is set.
 
 Use Decky's plugin settings to uninstall 8BitDo Deck. Decky removes plugin files; downloaded firmware, diagnostics, and job records can remain in the state directory. Remove those files only after all update jobs have finished.
+
+The CLI uses the same state directory and can export diagnostics with `eightbitdo diagnostics`. Use the global `--state-dir PATH` option before the command only when you intentionally need a separate state directory. Separate directories do not share jobs or locks, so do not run them against the same device concurrently. Existing Decky jobs and cached firmware need no migration when using the default location.
+
+To remove the standalone executable, remove its installed file after all jobs finish. To remove the Python package, uninstall `eightbitdo-updater` from its environment or remove that dedicated environment. Neither action removes firmware caches, job records, or installed udev rules. Do not replace or delete the executable or its environment while an update worker is running.

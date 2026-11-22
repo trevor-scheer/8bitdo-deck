@@ -17,3 +17,5 @@ The workflow includes component identification, official firmware/protocol resea
 Keep proprietary updater binaries, firmware dumps, raw captures, and unique device identifiers out of the contribution. Use the skill's evidence template to document reproducible findings and the exact support claim. Firmware installation remains explicitly confirmed; invoking the skill does not authorize it.
 
 See [Development](README.md#development) for the checks to run and [protocol requirements](docs/protocol.md#authorization-and-hardware-qualification) for experimental versus hardware-validated support. The contribution should pass CI and disclose untested cases before review. Submitting a PR does not merge it or publish a release.
+
+Firmware behavior belongs in the shared backend, so a device contribution benefits both the standalone CLI and Decky. Read the [architecture](docs/architecture.md) before changing platform-specific behavior, and use the [public API](docs/api.md) when adding a frontend. The [release procedure](docs/releasing.md) describes binary, Python, and Decky packaging; a device-support PR does not require a release or version bump by itself.
