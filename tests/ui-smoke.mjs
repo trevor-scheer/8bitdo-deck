@@ -162,6 +162,22 @@ test("identified devices automatically select and load firmware, while rescans r
   assert.equal(modelPicker().props.selectedOption, "", "Unverified candidates must not select a firmware target");
 });
 
+test("a verified wireless controller keeps its receiver-bound selection for preparation", async (t) => {
+  const { state, controllerModel, receiver, button, click, renderedText } = await mount(t);
+  controllerModel.download_only = false;
+  controllerModel.wireless_only = true;
+  state.devices = [{ ...receiver, id: "paired-aaaaaaaaaaaaaaaa", name: "Controller via receiver",
+    model_id: controllerModel.id, role: "controller", backend: "wireless", status: "identified" }];
+  await click("Scan connected devices");
+  await click("Controller via receiver");
+  assert.ok(button("Prepare firmware"));
+  assert.ok(renderedText().includes("at least 30%"));
+  await click("Prepare firmware");
+  assert.equal(state.prepareCalls[0][0], "paired-aaaaaaaaaaaaaaaa");
+  assert.equal(state.prepareCalls[0][1], controllerModel.id);
+  assert.deepEqual(state.installCalls, []);
+});
+
 test("a pending scan cannot replace a newer manual model choice", async (t) => {
   const { state, controllerModel, modelPicker, click } = await mount(t);
   let finishScan;

@@ -9,10 +9,12 @@ export interface Device {
   status: string;
   can_update: boolean;
   reason: string;
+  backend?: string;
 }
 
 export interface Model {
   download_only?: boolean;
+  wireless_only?: boolean;
   id: string;
   name: string;
   role: string;

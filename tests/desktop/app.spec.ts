@@ -9,6 +9,7 @@ async function mockBackend(
     appInterrupted?: boolean;
     activeInstall?: boolean;
     failOperation?: string;
+    wireless?: boolean;
   } = {},
 ) {
   await page.addInitScript((options) => {
@@ -17,7 +18,8 @@ async function mockBackend(
         id: "ultimate2-controller",
         name: "Ultimate 2 Wireless Controller",
         role: "controller",
-        download_only: true,
+        download_only: !options.wireless,
+        wireless_only: options.wireless,
         instructions: "Connect the controller by USB.",
         support: "Controller firmware installation is not qualified.",
       },
@@ -40,7 +42,8 @@ async function mockBackend(
       },
     ];
     const devices = models.slice(0, 2).map((model, i) => ({
-      id: `device-${i}`,
+      id: options.wireless && i === 0 ? "paired-aaaaaaaaaaaaaaaa" : `device-${i}`,
+      backend: options.wireless && i === 0 ? "wireless" : "hid",
       name: model.name,
       vid: "2dc8",
       pid: i ? "6013" : "301a",
@@ -305,6 +308,15 @@ test("library browsing cannot bind a download to an attached device", async ({
   await expect(
     page.getByRole("button", { name: "Review installation" }),
   ).toHaveCount(0);
+});
+
+test("wireless preparation retains the receiver-bound controller and requires confirmation", async ({ page }) => {
+  await mockBackend(page, { wireless: true });
+  await page.goto("/");
+  await expect(page.getByText(/charge the controller to at least 30%/)).toBeVisible();
+  await page.getByRole("button", { name: "Prepare firmware" }).click();
+  expect((await calls(page, "prepare_update"))[0].parameters.device_id).toBe("paired-aaaaaaaaaaaaaaaa");
+  expect(await calls(page, "install_update")).toHaveLength(0);
 });
 
 test("a pending scan does not overwrite a newer library selection", async ({

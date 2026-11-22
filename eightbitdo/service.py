@@ -22,7 +22,7 @@ from .protocol import (
     parse_firmware, query_identity, verify_authorization_sources,
 )
 from .recovery import finish_recovery, inspect_recovery
-from .qualifications import has_native_installation, qualification_for
+from .qualifications import has_native_installation, has_wireless_installation, qualification_for
 from .registry import MODELS, get_model
 
 
@@ -110,14 +110,8 @@ class Service:
         devices = self.platform.discover()
         if probe:
             devices = [self.platform.inspect_device(d, self.state_dir / "locks") for d in devices]
-            paired_devices = [Device(
-                id="paired-" + d.id.removeprefix("usb-"),
-                name="Ultimate 2 Wireless controller (via receiver)", vid="2dc8", pid="wireless",
-                role="controller", model_id="ultimate2-controller", firmware_version=d.paired_firmware_version,
-                status="wireless", can_update=False,
-                reason="Firmware version read wirelessly through the receiver. Native firmware installation is not yet validated.",
-            ) for d in devices if d.paired_firmware_version]
-            devices.extend(paired_devices)
+            from .wireless_service import paired_devices
+            devices.extend(paired_devices(self, devices))
         warnings = []
         try:
             devices.extend(self.fwupd.devices())
@@ -154,7 +148,9 @@ class Service:
         return {"devices": results}
 
     def get_models(self) -> list[dict]:
-        models = [{**model.public(), "download_only": not (self.platform.native_write and has_native_installation(model.firmware_pid))}
+        models = [{**model.public(), "download_only": not (self.platform.native_write and (
+                       has_native_installation(model.firmware_pid) or has_wireless_installation(model.firmware_pid))),
+                   "wireless_only": has_wireless_installation(model.firmware_pid) and not has_native_installation(model.firmware_pid)}
                   for model in MODELS]
         try:
             for device in self.fwupd.devices():
@@ -214,8 +210,10 @@ class Service:
             else:
                 get_model(model_id)
                 if device_id:
-                    if not re.fullmatch(r"usb-[0-9a-f]{16}", device_id):
-                        raise ValueError("Invalid USB device selection.")
+                    if not re.fullmatch(r"(?:usb|paired)-[0-9a-f]{16}", device_id):
+                        raise ValueError("Invalid connected device selection.")
+                    if device_id.startswith("paired-") and model_id != "ultimate2-controller":
+                        raise ValueError("Wireless identity does not match this firmware model.")
                     devices, _ = self._devices()
                     device = next((d for d in devices if d.id == device_id), None)
                     if not device or device.model_id != model_id or device.status != "identified":
@@ -251,10 +249,10 @@ class Service:
     def _install_update(self, job_id: str) -> dict:
         with self.store.lock(job_id):
             job = self.store.read(job_id)
-            if job["state"] != "ready" or not job["can_install"] or job.get("backend") not in {"fwupd", "hid"}:
+            if job["state"] != "ready" or not job["can_install"] or job.get("backend") not in {"fwupd", "hid", "wireless"}:
                 raise ValueError("This firmware is not qualified for installation. No firmware was written.")
-            if job.get("backend") == "hid" and not self.recovery_access.status()['configured']:
-                raise ValueError("Configure receiver recovery access before installing firmware.")
+            if job.get("backend") in {"hid", "wireless"} and not self.recovery_access.status()['configured']:
+                raise ValueError("Configure USB recovery access before installing firmware.")
             job.update(state="queued", can_install=False, progress=0, message="Starting the confirmed update. Keep the device connected.")
             self._spawn(job, "install")
             return public_job(job)
@@ -298,6 +296,11 @@ class Service:
         if self.platform.native_write is False:
             from .hidapi_backend import WRITE_UNAVAILABLE
             job["message"] = "Firmware downloaded and header validated. " + WRITE_UNAVAILABLE + " " + artifact.verification_note
+        elif job["device_id"].startswith("paired-") and model.id == "ultimate2-controller":
+            from .wireless_service import prepare_wireless
+            prepare_wireless(self, job, image)
+        elif has_wireless_installation(model.firmware_pid) and not has_native_installation(model.firmware_pid):
+            job["message"] = "Connect this controller in 2.4 GHz mode through its USB receiver, then select the controller listed via receiver. Direct USB and Bluetooth installation are not enabled. " + job["message"]
         elif not has_native_installation(model.firmware_pid):
             job["message"] = "Download only. This app does not install firmware on this model yet. " + job["message"]
         elif not job["device_id"]:
@@ -330,6 +333,11 @@ class Service:
 
     def run_install(self, job: dict) -> None:
         self.platform.require_write_support()
+        if job.get("backend") == "wireless":
+            from .wireless_service import install_wireless, receiver_id
+            with self.store.lock("update-" + receiver_id(job["device_id"])):
+                install_wireless(self, job)
+            return
         if job.get("backend") == "hid":
             with self.store.lock("update-" + job["device_id"]):
                 self._install_native(job)

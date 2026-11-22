@@ -62,7 +62,8 @@ class ServiceTests(unittest.TestCase):
 
     def test_model_download_only_advice_matches_host_and_reviewed_paths(self):
         models = {model['id']: model for model in self.service.get_models()}
-        self.assertTrue(models['ultimate2-controller']['download_only'])
+        self.assertFalse(models['ultimate2-controller']['download_only'])
+        self.assertTrue(models['ultimate2-controller']['wireless_only'])
         self.assertTrue(models['ultimate-24g-receiver']['download_only'])
         self.assertFalse(models['ultimate2-receiver']['download_only'])
         self.assertFalse(models['ultimate-bluetooth-receiver']['download_only'])
@@ -76,15 +77,15 @@ class ServiceTests(unittest.TestCase):
         self.assertIn('No identified device', job['message'])
         self.assertFalse(job['can_install'])
 
-    def test_controller_download_explains_unsupported_installation(self):
+    def test_controller_download_explains_required_wireless_connection(self):
         image = struct.pack('<7I', 106, 0x6000, 4, 0x6012, 0, 0, 0) + b'test'
         self.image_path.write_bytes(image)
         self.catalog.download.return_value = replace(self.catalog.download.return_value,
                                                      sha256=hashlib.sha256(image).hexdigest())
         job = self.service.store.create('', 'ultimate2-controller', 'release1')
         self.service.run_prepare(job)
-        self.assertIn('Download only', job['message'])
-        self.assertIn('does not install firmware on this model', job['message'])
+        self.assertIn('2.4 GHz mode through its USB receiver', job['message'])
+        self.assertIn('Direct USB and Bluetooth installation are not enabled', job['message'])
         self.assertFalse(job['can_install'])
 
     def test_preparation_distinguishes_current_and_unreviewed_source_versions(self):
