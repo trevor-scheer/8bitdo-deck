@@ -99,15 +99,25 @@ class Fetcher(Protocol):
 def _tls_context() -> ssl.SSLContext:
     context = ssl.create_default_context()
     if (
-        sys.platform != "linux"
-        or context.cert_store_stats()["x509_ca"]
+        context.cert_store_stats()["x509_ca"]
         or "SSL_CERT_FILE" in os.environ
         or "SSL_CERT_DIR" in os.environ
     ):
         return context
     # Bundled Python can point at nonexistent CA paths. Preserve explicit trust overrides,
     # including lazy certificate directories, and supplement only an empty default store.
-    for cafile in _SYSTEM_CA_FILES:
+    if sys.platform == "linux":
+        candidates = _SYSTEM_CA_FILES
+    else:
+        # Frozen macOS Python can retain the build machine's OpenSSL CA path.
+        # Windows usually loads its native store above; use the bundled Mozilla
+        # store only when no default roots or explicit overrides are available.
+        try:
+            import certifi
+        except ImportError:
+            return context
+        candidates = (certifi.where(),)
+    for cafile in candidates:
         try:
             context.load_verify_locations(cafile=cafile)
         except (OSError, ssl.SSLError):

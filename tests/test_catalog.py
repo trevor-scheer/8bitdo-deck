@@ -257,11 +257,28 @@ class TrustStoreTests(unittest.TestCase):
         self.make_fetcher(bundles=(str(self.root / "missing.pem"),))
         self.assertEqual(self.context.cert_store_stats()["x509_ca"], 0)
 
-    def test_other_platforms_preserve_their_default_context(self):
+    def test_other_platforms_preserve_populated_native_stores(self):
+        self.context.load_verify_locations(cafile=str(self.bundle))
         for platform in ("darwin", "win32"):
             with self.subTest(platform=platform), patch.object(self.context, "load_verify_locations") as loader:
                 self.make_fetcher(platform=platform)
                 loader.assert_not_called()
+
+    def test_empty_desktop_store_uses_bundled_certifi_with_verification_enabled(self):
+        certifi = Mock()
+        certifi.where.return_value = str(self.bundle)
+        with patch.dict('sys.modules', {'certifi': certifi}):
+            self.make_fetcher(platform='darwin')
+        certifi.where.assert_called_once_with()
+        self.assertEqual(self.context.cert_store_stats()['x509_ca'], 1)
+
+    def test_explicit_desktop_trust_prevents_certifi_fallback(self):
+        certifi = Mock()
+        for platform in ('darwin', 'win32'):
+            for key in ('SSL_CERT_FILE', 'SSL_CERT_DIR'):
+                with self.subTest(platform=platform, key=key), patch.dict('sys.modules', {'certifi': certifi}):
+                    self.make_fetcher(platform=platform, environment={key: 'custom-trust'})
+        certifi.where.assert_not_called()
 
     def test_certificate_failure_does_not_retry_or_change_trust(self):
         fetcher = self.make_fetcher()
