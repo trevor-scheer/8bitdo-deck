@@ -2,12 +2,12 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "c8b0864d799f6230825367dff034434836c2719c8cc51cef997bc23d32f385c314725d19ade6f4ca1ec39004344a2afff83046eb86b2fd8fc3c3695753ba7400"
+   "sig": "5af5744ed92c6fe2dc413d7d7c5cb6a77247cc6a047597cf19d33861283834e5ce5c403682fa55414bec1ff81ff6836dad304ce6a6ab4174e159f9dec0a4070d"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-22T21:42:26Z",
+  "expires": "2026-12-22T22:10:36Z",
   "spec_version": "1.0.31",
   "targets": {
    "eightbitdo-cli-linux-aarch64-0.3.0a1.tar.gz": {
@@ -49,8 +49,28 @@
      "sha256": "0d6ec02a3665fe2e8ca81983b649f838410eace5f4ec0a73250efecc2bc10016"
     },
     "length": 27831316
+   },
+   "eightbitdo-cli-linux-aarch64-0.3.0a3.tar.gz": {
+    "custom": {
+     "tufup": {
+      "required": false
+     },
+     "user": {
+      "arch": "aarch64",
+      "platform": "linux",
+      "product": "cli",
+      "release_notes": "This alpha adds an experimental 2.4 GHz firmware update route for the Ultimate 2 Wireless controller on Linux, shared by Decky, the desktop app, and the CLI.\n\n- Supported upgrade: stable controller **1.09 \u2192 exact official 1.10**, edition 1, through a USB-connected receiver running stable **1.06**. Both components' bootloader and application fingerprints must match the reviewed code. The controller must report at least 30% battery.\n- Controller and receiver firmware remain separate. A controller already running 1.10 reports that no update is needed; the app does not downgrade or reinstall it automatically. Receiver 1.01 needs its separate USB update before it can carry wireless controller updates.\n- Transfer verifies checksums, full readback, and erased sector padding before commit. The worker holds the receiver lock and sleep inhibitor through reconnection and checks the returning controller version.\n- Interrupted wireless jobs retain their cached image and offer a separately confirmed USB recovery check and action. Recovery verifies the controller bootloader and firmware state before resetting a verified image or erasing and reinstalling the cached controller firmware. The USB recovery connection can use a different port from the receiver.\n- Bluetooth updates, normal direct-USB controller installation, and macOS/Windows firmware writes remain unavailable. Existing receiver update authorizations are unchanged.\n\nThe USB controller boot-entry, inspection, and unchanged-firmware return passed on hardware. The full wireless transfer, USB rescue reinstall, and power-loss behavior have not been hardware-validated. This is source-reviewed experimental support, not a guarantee against bricking. See the [wireless evidence](https://github.com/trevor-scheer/8bitdo-deck/blob/v0.3.0-alpha.3/docs/devices/ultimate2-wireless.md) and [USB recovery contract](https://github.com/trevor-scheer/8bitdo-deck/blob/v0.3.0-alpha.3/docs/devices/ultimate2-controller-recovery.md) for the tested scope.\n\nInstall `8bitdo-deck.zip` with Decky's ZIP installer. Standalone apps can check the **Alpha** update channel; updating a standalone app does not replace the Decky plugin.\n",
+      "release_tag": "v0.3.0-alpha.3",
+      "schema": 1,
+      "version": "0.3.0a3"
+     }
+    },
+    "hashes": {
+     "sha256": "06ac7ec92851231f964c99a2353f129122a5f2b0229f965a62cbb12f3b72b92d"
+    },
+    "length": 27865966
    }
   },
-  "version": 4
+  "version": 5
  }
 }
