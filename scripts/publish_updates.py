@@ -27,12 +27,16 @@ def main():
     parser.add_argument("--inputs", type=Path)
     parser.add_argument("--release-assets", type=Path)
     parser.add_argument("--tag")
+    parser.add_argument("--notes-file", type=Path)
     args = parser.parse_args()
+    if args.action == "prepare" and not all((args.inputs, args.release_assets, args.tag, args.notes_file)):
+        parser.error("prepare requires --inputs, --release-assets, --tag, and --notes-file")
+    notes = args.notes_file.read_text(encoding="utf-8") if args.action == "prepare" else ""
+    if args.action == "prepare" and not notes.strip():
+        parser.error("release notes must not be empty")
     secret = json.loads(os.environ.pop("EIGHTBITDO_TUF_SIGNING_KEYS"))
     if set(secret) != KEY_FILES or not all(isinstance(value, str) for value in secret.values()):
         raise ValueError("Expected public role keys and three online private keys; never the offline root private key.")
-    if args.action == "prepare" and not all((args.inputs, args.release_assets, args.tag)):
-        parser.error("prepare requires --inputs, --release-assets, and --tag")
     with tempfile.TemporaryDirectory(prefix="eightbitdo-online-signing-") as temporary:
         working = Path(temporary)
         keys = working / "keys"
@@ -52,7 +56,7 @@ def main():
                 if {path.name for path in source.iterdir()} != {"application"}:
                     raise ValueError(f"Unexpected app-unit layout for {name}")
                 target = add_bundle(repository, keys, name, source / "application",
-                                    str(project_version(ROOT)), args.tag)
+                                    str(project_version(ROOT)), args.tag, notes=notes)
                 args.release_assets.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(target, args.release_assets / target.name)
             else:

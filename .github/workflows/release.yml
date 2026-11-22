@@ -38,7 +38,11 @@ jobs:
       - name: Validate tag and package versions
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: python scripts/check_version.py --tag "$RELEASE_TAG"
+        run: |
+          python scripts/check_version.py --tag "$RELEASE_TAG"
+          notes_file="docs/releases/${RELEASE_TAG#v}.md"
+          test -s "$notes_file"
+          echo "RELEASE_NOTES=$notes_file" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -53,7 +57,7 @@ jobs:
         env:
           EIGHTBITDO_TUF_SIGNING_KEYS: ${{ secrets.EIGHTBITDO_TUF_SIGNING_KEYS }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: python scripts/publish_updates.py prepare --metadata-checkout update-metadata --inputs update-inputs --release-assets release-assets --tag "$RELEASE_TAG"
+        run: python scripts/publish_updates.py prepare --metadata-checkout update-metadata --inputs update-inputs --release-assets release-assets --tag "$RELEASE_TAG" --notes-file "$RELEASE_NOTES"
       - name: Retain prepared public metadata for publication recovery
         uses: actions/upload-artifact@v4
         with:
@@ -93,8 +97,9 @@ jobs:
           set -euo pipefail
           if gh release view "$RELEASE_TAG" --json isDraft > existing-release.json 2>/dev/null; then
             test "$(jq -r .isDraft existing-release.json)" = true
+            gh release edit "$RELEASE_TAG" --notes-file "$RELEASE_NOTES"
           else
-            gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes --title "8BitDo Updater $RELEASE_TAG"
+            gh release create "$RELEASE_TAG" --verify-tag --draft --notes-file "$RELEASE_NOTES" --title "8BitDo Updater $RELEASE_TAG"
           fi
           gh release upload "$RELEASE_TAG" release-assets/* --clobber
           if [[ "$RELEASE_TAG" == *-* ]]; then
