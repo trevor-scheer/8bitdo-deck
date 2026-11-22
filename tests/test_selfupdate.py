@@ -63,6 +63,9 @@ class SignedUpdateTests(unittest.TestCase):
         self.neighbor = self.directory / 'unrelated.txt'
         self.neighbor.write_text('preserve me')
         self.state = self.directory / 'state'
+        coordination = patch('eightbitdo.service.default_state_dir', return_value=self.state)
+        coordination.start()
+        self.addCleanup(coordination.stop)
         host = Mock()
         host.worker_running.return_value = False
         self.service = Service(self.state, platform=host)
