@@ -29,7 +29,7 @@ def archive_update(product, application):
 
 def archive_directory(directory, destination, *, zip_format=False):
     if zip_format:
-        with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, strict_timestamps=False) as archive:
             for path in directory.rglob("*"):
                 if path.is_file():
                     archive.write(path, path.relative_to(directory.parent))
