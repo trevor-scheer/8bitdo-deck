@@ -54,6 +54,16 @@ Native `setWirelessupdate` (VA `0x1042d5f0`) sets a flag read by the packet buil
 
 The vendor's Ultimate 2 transfer branch starts erase/write/CRC offsets at zero and reads payload bytes after the 28-byte DAT header. It uses 4,096-byte blocks and at most 46 bytes per write. Native initialization at VA `0x10424170` sends `C1` with parameters, length, total length, and offset all zero. Commit at VA `0x1042c9d0` sends `C4` with length and total length 8, offset 0, and payload length/version as two little-endian 32-bit values, followed by command `07` to reset. The native backend now matches these fields. These facts establish intent and addressing, not successful installation by this project.
 
+## Original Ultimate Bluetooth 80NA
+
+Static review on 2026-11-22 did not establish a 2.4 GHz firmware-update route from receiver `6008` to the original Ultimate Bluetooth controller `6007`. This is an evidence gap, not proof that wireless updates are impossible. The Ultimate 2 route above cannot be assumed to apply to this family, and the receiver's own boot/update path does not establish controller forwarding.
+
+The [original controller's support page](https://support.8bitdo.com/ultimate/ultimate-bluetooth-controller.html) links the [Windows Ultimate Software V1 archive](https://download.8bitdo.com/Ultimate-Software/8BitDo-Ultimate-Software-for-Windows.zip?0301=), containing version 2.16. The inspected archive has SHA-256 `01dab0c15e7a830caf5d43ce932a6a6ebca66b0d627698dab661ca23eef3d149`; `8BitDo Ultimate Software.exe` has SHA-256 `56c50445ea8733e119bcc3e0bdfa02566972a47c63f4e4905ad93e5b9cd0a25e`; `8BitDoAdvance.dll` has SHA-256 `dd56c6e70b9bfb48fc138356f14b0267c3ca146570d45af9afbc960ab32645e5`. The support page's 2.4 GHz configuration support does not establish firmware-update support.
+
+V1 retains `S_ControllerUpdaterView::jumpBoot` (RVA `0xd4a1`), `monitorBoot` (`0xd574`), and `startUpdate` (`0xd344`). This flow waits for USB boot-device enumeration through `S_Boot::findBootUpdate` (`0x68750`), then calls `dll_usbUpdateDpad`. No managed callers of its `HomeController::loadNewVersion` entry were found, so the retained flow may be inactive. V2's explicit `setWirelessupdate` call is guarded by the Ultimate 2 product identity; it supplies no equivalent route for `6007`.
+
+Further work needs primary evidence of controller/receiver firmware-update forwarding or an official wireless transaction, followed by recovery review. The separate [historical Bluetooth LE updater lead](#bluetooth-possibilities) also remains unverified. This review used static artifacts only; it sent no commands to first-generation hardware.
+
 ## Radio initialization and idle recovery
 
 Controller 1.10's `C1` handler at payload offset `0xb664` constructs a 16-byte geometry response. Its radio branch at `0xb6b4` sends only `request.length + 17` bytes through the RF queue at `0x143c`. The official request has length zero, so only the class byte and 16-byte header reach the receiver. A radio initializer must require a successful `C1` acknowledgment with zero length, CRC, total length, and offset. It must not interpret HID padding as geometry. Exact installed-code fingerprints establish the reviewed logical base zero and 4096-byte block size.
