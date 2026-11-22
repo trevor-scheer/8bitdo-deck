@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Local desktop UI; sidecar access is only through the fixed Rust command boundary.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

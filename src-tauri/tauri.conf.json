@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "8BitDo Updater",
+  "version": "0.3.0-alpha.1",
+  "identifier": "dev.t11r.eightbitdo-updater",
+  "mainBinaryName": "eightbitdo-updater",
+  "build": {
+    "beforeDevCommand": "pnpm run dev:desktop",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "pnpm run build:desktop",
+    "frontendDist": "../out/desktop"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "8BitDo Updater",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 720,
+        "minHeight": 600,
+        "backgroundColor": "#101719",
+        "create": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": [
+      "binaries/eightbitdo"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Utility",
+    "shortDescription": "Unified firmware companion for 8BitDo devices",
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "resources": {
+      "../out/licenses/": "licenses/"
+    }
+  }
+}
