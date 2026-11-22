@@ -6,9 +6,42 @@ Neither downloaded metadata nor a UI request may populate this collection.
 
 from .protocol import DeviceIdentity, FirmwareImage, FlashAuthorization, FlashQualification, SourceRegion, SourceReviewedAuthorization
 from .legacy_protocol import LegacySourceReviewedAuthorization, ReceiverInitialization
+from .wireless import WirelessAuthorization, WirelessTarget
 
 
 QUALIFICATIONS: tuple[FlashQualification, ...] = ()
+WIRELESS_AUTHORIZATIONS: tuple[WirelessAuthorization, ...] = (
+    WirelessAuthorization(
+        controller=SourceReviewedAuthorization(
+            product_id=0x6012,
+            hardware_revision=None,
+            image_revision=0,
+            image_sha256="968edee528c23d56e2059288f90c109fa5135f060de5b403e72d0b6c50f5eb87",
+            evidence=(
+                "Experimental Ultimate 2 Wireless controller 1.09 to official 1.10 through receiver 1.06. "
+                "The exact controller and receiver bootloaders and installed applications must match reviewed fingerprints. "
+                "Controller edition 1 is required; hardware revision is unreported. "
+                "A controller running 1.10 completed USB boot inspection and return with unchanged firmware on 2026-11-22. "
+                "The 1.09 radio transaction and USB rescue protocol were source-reviewed and tested with simulated failures. "
+                "A complete wireless transfer, USB rescue reinstall, and power-loss recovery remain untested on hardware. "
+                "Keep a USB data cable available for recovery. See docs/devices/ultimate2-wireless.md "
+                "and docs/devices/ultimate2-controller-recovery.md."
+            ),
+            source_versions=(109,),
+            source_regions=(
+                SourceRegion(0, 0x5000, "faab5fff75e88556749d15980f84926592fc04329da2866e9af36919af529fa5"),
+                SourceRegion(0x5000, 145408, "6a2ff4de75982f398a2d19a57f1c43f1bda98e4154f1e3b9686ee41678c7b3a1"),
+            ),
+        ),
+        receiver_version_raw=106,
+        receiver_source_regions=(
+            SourceRegion(0, 0x5000, "20b9904986708ffae77491630faa24a5fb98ef073cdb557488a82be05e9ce5e7"),
+            SourceRegion(0x5000, 40448, "e5bc101ea9b9f1c970a7fbffe4a92261400ad49cbdb58d4190d08a6fd404b3fe"),
+        ),
+        controller_edition=1,
+        minimum_battery_percent=30,
+    ),
+)
 SOURCE_REVIEWED_AUTHORIZATIONS: tuple[SourceReviewedAuthorization, ...] = (
     SourceReviewedAuthorization(
         product_id=0x6013,
@@ -59,6 +92,26 @@ def has_native_installation(product_id: int) -> bool:
     """Advisory model capability; exact image/device authorization is still required."""
     records = (*QUALIFICATIONS, *SOURCE_REVIEWED_AUTHORIZATIONS, *LEGACY_SOURCE_REVIEWED_AUTHORIZATIONS)
     return any(entry.product_id == product_id for entry in records)
+
+
+def has_wireless_installation(product_id: int) -> bool:
+    return any(entry.controller.product_id == product_id for entry in WIRELESS_AUTHORIZATIONS)
+
+
+def wireless_qualification_for(image: FirmwareImage, target: WirelessTarget) -> WirelessAuthorization | None:
+    return next((entry for entry in WIRELESS_AUTHORIZATIONS if (
+        entry.controller.product_id == target.controller.product_id == image.product_id
+        and target.controller.target_verified and target.receiver.target_verified
+        and entry.controller.hardware_revision == target.controller.hardware_revision
+        and entry.controller.image_revision == image.revision
+        and entry.controller.image_sha256 == image.sha256
+        and bool(entry.controller.evidence.strip())
+        and target.controller.version_raw in entry.controller.source_versions
+        and target.controller.beta == 0
+        and target.receiver.product_id == 0x6013
+        and target.receiver.version_raw == entry.receiver_version_raw and target.receiver.beta == 0
+        and target.status.edition == entry.controller_edition
+    )), None)
 
 
 def qualification_for(image: FirmwareImage, identity: DeviceIdentity) -> FlashAuthorization | None:
