@@ -425,7 +425,10 @@ def _validate_flash_authorization(
         raise FirmwareMismatch("Firmware changed after qualification")
     if isinstance(qualification, FlashQualification):
         return ()
-    regions = qualification.source_regions
+    return _validate_source_regions(qualification.source_regions, identity.product_id)
+
+
+def _validate_source_regions(regions: tuple[SourceRegion, ...], product_id: int) -> tuple[SourceRegion, ...]:
     if type(regions) is not tuple or len(regions) != 2 or any(type(r) is not SourceRegion for r in regions):
         raise UnsupportedProtocol("Source review requires immutable boot and installed application fingerprints")
     for region in regions:
@@ -438,7 +441,7 @@ def _validate_flash_authorization(
     by_address = {region.address: region for region in regions}
     if (
         set(by_address) != {0, 0x5000} or by_address[0].length != 0x5000
-        or not 36 <= by_address[0x5000].length <= MAX_APPLICATION_SIZES[identity.product_id]
+        or not 36 <= by_address[0x5000].length <= MAX_APPLICATION_SIZES[product_id]
     ):
         raise UnsupportedProtocol("Source fingerprints must cover the bootloader and bounded installed application")
     return (by_address[0], by_address[0x5000])
@@ -456,7 +459,11 @@ def verify_authorization_sources(
     Preparation and installation must both call this check. It never initializes,
     writes, or resets a device, and never returns the source bytes to the caller.
     """
-    for region in _validate_flash_authorization(image, identity, qualification):
+    _verify_source_regions(transport, _validate_flash_authorization(image, identity, qualification), identity.product_id)
+
+
+def _verify_source_regions(transport: ReportTransport, regions: tuple[SourceRegion, ...], product_id: int) -> None:
+    for region in regions:
         digest = hashlib.sha256()
         first = b""
         for position in range(0, region.length, 32):
@@ -472,7 +479,7 @@ def verify_authorization_sources(
         if region.address == 0x5000:
             extent = int.from_bytes(first[24:28], "little")
             if (
-                first[8:12] != b"KNLT" or int.from_bytes(first[28:30], "little") != identity.product_id
+                first[8:12] != b"KNLT" or int.from_bytes(first[28:30], "little") != product_id
                 or not 32 <= extent <= region.length - 4 or extent % 4
             ):
                 raise FirmwareMismatch("Source fingerprint does not cover a complete matching application")
@@ -506,6 +513,16 @@ the returned result; this function never declares a completed update.
     block_size = struct.unpack_from("<I", initialization.payload, 12)[0]
     if initial_address != 0 or block_size != BLOCK_SIZE:
         raise ProtocolError("Device initialization returned an unsupported flash block size")
+    return _flash_application_blocks(transport, image, progress=progress)
+
+
+def _flash_application_blocks(
+    transport: ReportTransport, image: FirmwareImage,
+    *, progress: Callable[[str, int, int], None] | None = None,
+) -> FlashResult:
+    """Transfer after the route has verified identity, sources, metadata, and initialization."""
+    total = len(image.payload)
+    notify = progress or (lambda stage, done, size: None)
     for block_start in range(0, total, BLOCK_SIZE):
         block = image.payload[block_start:block_start + BLOCK_SIZE]
         notify("erasing", block_start, total)
@@ -520,13 +537,13 @@ the returned result; this function never declares a completed update.
                 raise ProtocolError("Write acknowledgment address does not match")
             notify("writing", offset + len(chunk), total)
         notify("verifying", block_start, total)
-        _verify_block(transport, block_start, block, staging_base=STAGING_BASES[identity.product_id])
+        _verify_block(transport, block_start, block, staging_base=STAGING_BASES[image.product_id])
     # Recheck earlier blocks after all writes, before making the staged image bootable.
     for block_start in range(0, total, BLOCK_SIZE):
         notify("verifying", block_start, total)
         _verify_block(
             transport, block_start, image.payload[block_start:block_start + BLOCK_SIZE],
-            staging_base=STAGING_BASES[identity.product_id],
+            staging_base=STAGING_BASES[image.product_id],
         )
     notify("committing", total, total)
     _exchange(transport, 0xC4, data=struct.pack("<II", total, image.version_raw), total_length=8)

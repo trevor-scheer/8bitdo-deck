@@ -49,7 +49,7 @@ class WirelessTests(unittest.TestCase):
         self.assertEqual(len(transport.sent), 2)
 
     def test_unreviewed_controller_version_or_beta_never_sends_radio_command(self):
-        for status in (status_report(version=109), status_report(beta=1)):
+        for status in (status_report(version=108), status_report(beta=1)):
             transport = QueueTransport([product_reply(), identity_report(), status])
             with self.subTest(status=status), self.assertRaises(UnsupportedProtocol):
                 query_wireless_target(transport, usb_pid=0x6013)
