@@ -35,6 +35,12 @@ def _setup_error(code, message):
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "--apply-app-update":
+        if len(arguments) != 3:
+            raise SystemExit("Expected --apply-app-update STATE_DIR TOKEN.")
+        from .selfupdate import finish_update
+        finish_update(Path(arguments[1]), arguments[2])
+        return 0
     if arguments and arguments[0] == "--worker":
         if len(arguments) != 4:
             raise SystemExit("Expected --worker STATE_DIR JOB_ID ACTION.")
@@ -42,11 +48,19 @@ def main(argv: list[str] | None = None) -> int:
         run(Path(arguments[1]), arguments[2], arguments[3])
         return 0
 
-    parser = argparse.ArgumentParser(description="8BitDo firmware updater for Linux")
+    parser = argparse.ArgumentParser(description="8BitDo firmware updater")
     parser.add_argument("--version", action="version", version=f"8BitDo Updater {__version__}")
     parser.add_argument("--state-dir", type=Path, help="Directory for local firmware cache and jobs")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("info", help="Show API version and operations without accessing hardware or state")
+    app_check = sub.add_parser("app-update-check", help="Check signed updates for this application")
+    app_check.add_argument("--channel", choices=["stable", "alpha"], default="stable")
+    app_apply = sub.add_parser("app-update-apply", help="Apply a reviewed application update")
+    app_apply.add_argument("version", help="Exact version returned by app-update-check")
+    app_apply.add_argument("--channel", choices=["stable", "alpha"], default="stable")
+    app_apply.add_argument("--confirm", action="store_true")
+    app_recover = sub.add_parser("app-update-recover", help="Roll back an interrupted application update")
+    app_recover.add_argument("--confirm", action="store_true")
     sub.add_parser("scan", help="Identify connected devices and read firmware versions")
     sub.add_parser("probe-wireless", help="Read firmware identity over a reviewed radio path without starting an update")
     sub.add_parser("models", help="List model-specific update guidance")
@@ -76,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     api.add_argument("--params", default="{}", help="Operation parameters as a JSON object")
     api.add_argument("--api-version", type=int, default=API_VERSION)
     args = parser.parse_args(arguments)
-    if args.command in {"install", "recover", "setup-recovery-access"} and not args.confirm:
+    if args.command in {"install", "recover", "setup-recovery-access", "app-update-apply", "app-update-recover"} and not args.confirm:
         parser.error("Review the requested operation, then supply --confirm to continue.")
 
     client = UpdaterAPI(args.state_dir)
@@ -103,7 +117,13 @@ def main(argv: list[str] | None = None) -> int:
         "diagnostics": ("export_diagnostics", {}),
         "official-updater": ("open_official_updater", {}),
     }
-    if args.command == "releases":
+    if args.command == "app-update-check":
+        operation, parameters = "check_app_update", {"channel": args.channel}
+    elif args.command == "app-update-apply":
+        operation, parameters = "apply_app_update", {"channel": args.channel, "version": args.version, "confirmed": True}
+    elif args.command == "app-update-recover":
+        operation, parameters = "recover_app_update", {"confirmed": True}
+    elif args.command == "releases":
         operation, parameters = "get_releases", {"model_id": args.model_id}
     elif args.command == "prepare":
         operation, parameters = "prepare_update", {"device_id": args.device_id, "model_id": args.model_id, "release_id": args.release_id}
