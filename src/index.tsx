@@ -83,7 +83,7 @@ function RecoveryAccessSettings({ disabled }: { disabled: boolean }) {
   }, [access?.pending]);
 
   return <>
-    <p role="status" style={textStyle}>{access?.message ?? (error ? "" : "Checking receiver recovery access…")}</p>
+    <p role="status" style={textStyle}>{access?.message ?? (error ? "" : "Checking USB recovery access…")}</p>
     {!access?.configured && <PanelSectionRow>
       <ButtonItem
         layout="below"
@@ -98,7 +98,7 @@ function RecoveryAccessSettings({ disabled }: { disabled: boolean }) {
             if (alive.current) setError(`Could not set up recovery access: ${errorMessage(reason)}`);
           }).finally(() => { if (alive.current) setStarting(false); });
         }}
-      >Set up receiver recovery</ButtonItem>
+      >Set up USB recovery</ButtonItem>
     </PanelSectionRow>}
     {error && <p role="alert" style={textStyle}>{error}</p>}
   </>;
@@ -359,13 +359,13 @@ function Content() {
       </PanelSectionRow>}
       {job.recovery_ready && <>
         <p style={textStyle}>{job.recovery_action === "reflash"
-          ? "Recovery will erase the receiver firmware and reinstall the exact cached image for this interrupted update. Keep USB connected and keep the Deck awake."
-          : "The receiver state has been checked. Recovery may finish an already committed update. Keep USB connected."}</p>
+          ? "Recovery will erase the device firmware and reinstall the exact cached image for this interrupted update. Keep USB connected and keep the Deck awake."
+          : "The device state has been checked. Recovery may finish an already committed update. Keep USB connected."}</p>
         <PanelSectionRow>
           <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {
             const result = await recoverUpdate(job.id, true);
             if (alive.current) setJob(result);
-          })}>{job.recovery_action === "reflash" ? "Confirm erase and reinstall" : "Confirm receiver recovery"}</ButtonItem>
+          })}>{job.recovery_action === "reflash" ? "Confirm erase and reinstall" : "Confirm device recovery"}</ButtonItem>
         </PanelSectionRow>
       </>}
       {!jobActive && <PanelSectionRow>

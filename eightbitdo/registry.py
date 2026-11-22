@@ -17,7 +17,8 @@ class Model:
 
 MODELS = (
     Model("ultimate2-controller", "Ultimate 2 Wireless controller", "controller", 94, 0x6012,
-          "Connect the controller directly with a USB data cable. The receiver has separate firmware."),
+          "Turn on the controller in 2.4 GHz mode and connect its receiver by USB. Charge the controller to at least 30%. Keep a USB data cable available for recovery.",
+          support="Experimental 2.4 GHz update from controller 1.09 to 1.10 through receiver 1.06 is available after exact firmware checks. Bluetooth and normal direct-USB installation are not enabled."),
     Model("ultimate2-receiver", "Ultimate 2 Wireless receiver", "receiver", 95, 0x6013,
           "Connect the USB receiver to the Deck, directly or through its dock. Paired controller status is shown separately from receiver firmware.",
           support="Experimental USB update from 1.01 to 1.06 is available after matching device and firmware checks. Other versions remain browse-only."),

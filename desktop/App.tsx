@@ -1016,7 +1016,7 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
                   ? "Confirm firmware installation"
                   : job?.recovery_action === "reflash"
                     ? "Confirm erase and reinstall"
-                    : "Confirm receiver recovery"
+                    : "Confirm device recovery"
           }
           busy={busy}
           onCancel={() => setConfirmation(null)}
@@ -1050,8 +1050,8 @@ export function App({ api = desktopAPI }: { api?: UpdaterClient }) {
               {confirmation === "recovery" ? (
                 <p>
                   {job?.recovery_action === "reflash"
-                    ? "Recovery will erase the receiver firmware and reinstall the exact cached image for this interrupted update."
-                    : "Recovery may reset the receiver to finish an already committed update."}
+                    ? "Recovery will erase the device firmware and reinstall the exact cached image for this interrupted update."
+                    : "Recovery may reset the device to finish an already committed update."}
                 </p>
               ) : (
                 <p>
