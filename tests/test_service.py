@@ -31,7 +31,7 @@ class ServiceTests(unittest.TestCase):
         self.catalog.list_releases.return_value = [self.release]
         self.fwupd = Mock()
         self.fwupd.devices.return_value = []
-        self.service = Service(self.root, catalog=self.catalog, fwupd=self.fwupd)
+        self.service = Service(self.root, coordination_dir=self.root, catalog=self.catalog, fwupd=self.fwupd)
         self.image_path = self.root / "image.dat"
         self.image_path.write_bytes(self.image)
         self.catalog.download.return_value = Artifact(str(self.image_path), hashlib.sha256(self.image).hexdigest(), self.release, False, "No verified vendor signature.")

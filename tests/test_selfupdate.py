@@ -99,7 +99,8 @@ class SignedUpdateTests(unittest.TestCase):
         backups = list(self.directory.glob('.eightbitdo.8bitdo-backup-*'))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), b'original application')
-        self.assertTrue(self.app.stat().st_mode & 0o100)
+        if os.name != 'nt':
+            self.assertTrue(self.app.stat().st_mode & 0o100)
 
     def test_apply_requires_confirmation_and_exact_reviewed_version(self):
         for confirmation in (False, 1, 'true'):

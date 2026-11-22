@@ -43,16 +43,19 @@ class JobStore:
         return job
 
     def save(self, job: dict) -> None:
-        destination = self.path(job["id"])
-        fd, temporary = tempfile.mkstemp(prefix=".job-", dir=self.directory)
+        self._write_json(self.path(job["id"]), job)
+
+    @staticmethod
+    def _write_json(destination: Path, value) -> None:
+        fd, temporary = tempfile.mkstemp(prefix=".job-", dir=destination.parent)
         try:
             with os.fdopen(fd, "w") as stream:
-                json.dump(job, stream, sort_keys=True)
+                json.dump(value, stream, sort_keys=True)
                 stream.flush()
                 os.fsync(stream.fileno())
             # Windows readers/virus scanners can briefly hold a handle without
             # delete sharing. Retain atomic replacement, with a bounded retry.
-            deadline = time.monotonic() + 1.0
+            deadline = time.monotonic() + 1.0 if sys.platform == "win32" else 0
             while True:
                 try:
                     os.replace(temporary, destination)
@@ -63,6 +66,24 @@ class JobStore:
                     time.sleep(0.01)
         finally:
             Path(temporary).unlink(missing_ok=True)
+
+    def registered_states(self) -> set[Path]:
+        path = self.root / 'firmware-state-dirs.json'
+        if not path.exists():
+            return set()
+        value = json.loads(path.read_text())
+        if not isinstance(value, list) or any(not isinstance(item, str) or not Path(item).is_absolute() for item in value):
+            raise ValueError('Invalid firmware state directory registry.')
+        return {Path(item) for item in value}
+
+    def register_state(self, state_dir: Path) -> None:
+        states = self.registered_states()
+        state_dir = state_dir.resolve()
+        if state_dir not in states:
+            self.write_registered_states(states | {state_dir})
+
+    def write_registered_states(self, states: set[Path]) -> None:
+        self._write_json(self.root / 'firmware-state-dirs.json', sorted(str(path) for path in states))
 
     def read(self, job_id: str) -> dict:
         try:

@@ -21,7 +21,7 @@ class LegacyRecoveryServiceTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        self.service = Service(self.root, catalog=Mock(), fwupd=Mock())
+        self.service = Service(self.root, coordination_dir=self.root, catalog=Mock(), fwupd=Mock())
         self.service.recovery_access.status = Mock(return_value={'configured': True})
         self.image = firmware()
         self.boot = ReceiverDevice(self.image)

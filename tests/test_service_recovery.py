@@ -19,7 +19,7 @@ class RecoveryServiceTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.service = Service(self.root, catalog=Mock(), fwupd=Mock())
+        self.service = Service(self.root, coordination_dir=self.root, catalog=Mock(), fwupd=Mock())
         self.service.recovery_access.status = Mock(return_value={'configured': True})
         self.boot = BootDevice()
         self.registry = patch('eightbitdo.qualifications.SOURCE_REVIEWED_AUTHORIZATIONS', (self.boot.authorization,))

@@ -11,7 +11,7 @@ def run(state_dir: Path, job_id: str, action: str) -> None:
     if action not in {"prepare", "install", "recover"}:
         raise ValueError("Unknown worker action.")
     service = Service(state_dir)
-    with service.store.lock(job_id):
+    with service.worker_guard(), service.store.lock(job_id):
         job = service.store.read(job_id)
         if job["state"] != "queued":
             return

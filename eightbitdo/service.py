@@ -12,6 +12,7 @@ from .discovery import Device, clean_text
 from .fwupd import FwupdError
 from .platform import current_platform
 from .jobs import ACTIVE_STATES, JobStore, default_state_dir, public_job
+from .locking import shared_lock
 from .legacy_protocol import (
     LegacySourceReviewedAuthorization, flash_boot_receiver, inspect_receiver_boot, request_receiver_boot,
     validate_receiver_authorization,
@@ -29,9 +30,10 @@ OFFICIAL_UPDATER = "https://web.8bitdo.com/"
 
 
 class Service:
-    def __init__(self, state_dir: Path | None = None, *, catalog=None, fwupd=None, platform=None):
+    def __init__(self, state_dir: Path | None = None, *, catalog=None, fwupd=None, platform=None, coordination_dir=None):
         self.state_dir = Path(state_dir) if state_dir is not None else default_state_dir()
         self.store = JobStore(self.state_dir)
+        self.coordination_dir = Path(coordination_dir) if coordination_dir is not None else default_state_dir()
         self.platform = platform if platform is not None else current_platform()
         self.catalog = catalog if catalog is not None else Catalog()
         self.fwupd = fwupd if fwupd is not None else self.platform.firmware_service()
@@ -39,21 +41,51 @@ class Service:
 
     @contextmanager
     def _queue_guard(self):
-        with self.store.lock("application-mutation"):
-            if (self.state_dir / "app-update-pending.json").exists():
+        coordinator = JobStore(self.coordination_dir)
+        with coordinator.lock("application-mutation"):
+            if (self.coordination_dir / "app-update-pending.json").exists():
                 raise RuntimeError("An application update is pending. Finish or resolve it before starting firmware jobs.")
+            coordinator.register_state(self.state_dir)
+            yield
+
+    @contextmanager
+    def worker_guard(self):
+        # Wait for the queuing parent to release its exclusive launch lock.
+        # Keep a shared lock until the worker has finished every device action.
+        with shared_lock(self.coordination_dir / 'locks/application-mutation.lock'):
+            if (self.coordination_dir / 'app-update-pending.json').exists():
+                raise RuntimeError('An application update is pending. The firmware worker cannot start.')
             yield
 
     @contextmanager
     def app_update_guard(self):
         """Exclude job launch/replacement races and refuse running workers."""
-        with self.store.lock("application-mutation"):
-            for path in self.store.directory.glob("*.json"):
-                job = self.store.read(path.stem)
-                if job.get("state") in ACTIVE_STATES or self.platform.worker_running(
-                    job.get("worker_pid"), job.get("worker_start"),
-                ):
-                    raise RuntimeError("Wait for firmware jobs to finish before updating the application.")
+        coordinator = JobStore(self.coordination_dir)
+        with coordinator.lock("application-mutation"):
+            states = coordinator.registered_states() | {self.state_dir.resolve(), self.coordination_dir.resolve()}
+            for state in states:
+                if not (state / 'jobs').is_dir():
+                    # The exclusive canonical lock proves no worker is using
+                    # a deleted temporary state directory. Late workers must
+                    # acquire its shared counterpart and re-read their job.
+                    continue
+                store = JobStore(state)
+                for path in store.directory.glob("*.json"):
+                    # The worker holds this lock through its final disk write.
+                    # Acquiring it also closes the startup/reconciliation race.
+                    with store.lock(path.stem):
+                        job = store.read(path.stem)
+                        if self.platform.worker_running(job.get("worker_pid"), job.get("worker_start")):
+                            raise RuntimeError("Wait for firmware jobs to finish before updating the application.")
+                        if job.get("state") in ACTIVE_STATES:
+                            if time.time() - job.get('started_at', job['created_at']) <= 10:
+                                raise RuntimeError("Wait for firmware jobs to finish before updating the application.")
+                            job.update(state='failed', can_install=False, recovery_ready=False, recovery_confirmed=False,
+                                       message='The worker stopped. Scan and verify the device before attempting another update.')
+                            store.save(job)
+            # All registered jobs are now terminal and no worker owns a lock.
+            # Future queues register again under this same canonical lock.
+            coordinator.write_registered_states(set())
             yield
 
     def check_app_update(self, channel: str):

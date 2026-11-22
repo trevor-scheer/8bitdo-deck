@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import struct
 import subprocess
@@ -22,7 +23,7 @@ class DesktopPlatformTests(unittest.TestCase):
         self.root = Path(temporary.name)
         with patch('eightbitdo.platform.sys.platform', 'darwin'):
             self.platform = DesktopPlatform()
-        self.service = Service(self.root, platform=self.platform, catalog=Mock())
+        self.service = Service(self.root, coordination_dir=self.root, platform=self.platform, catalog=Mock())
 
     def test_platform_selection_does_not_open_hardware(self):
         for name in ('darwin', 'win32'):
@@ -126,7 +127,7 @@ class ApplicationMutationTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.platform = Mock(native_write=True)
         self.platform.worker_running.return_value = False
-        self.service = Service(self.root, platform=self.platform, catalog=Mock(), fwupd=Mock())
+        self.service = Service(self.root, coordination_dir=self.root, platform=self.platform, catalog=Mock(), fwupd=Mock())
 
     def test_application_guard_refuses_active_jobs_and_live_completed_workers(self):
         job = self.service.store.create('', 'ultimate2-receiver', 'release')
@@ -168,6 +169,67 @@ class ApplicationMutationTests(unittest.TestCase):
         result = self.service.prepare_update('', 'ultimate2-receiver', 'release')
         self.assertIn('job_id', result)
         self.platform.start_worker.assert_called_once()
+
+    def test_custom_state_queue_is_registered_and_dead_worker_is_reconciled(self):
+        custom = Service(self.root / 'custom', coordination_dir=self.root, platform=self.platform, catalog=Mock(), fwupd=Mock())
+        result = custom.prepare_update('', 'ultimate2-receiver', 'release')
+        self.assertIn(custom.state_dir.resolve(), self.service.store.registered_states())
+        with self.assertRaisesRegex(RuntimeError, 'firmware jobs'):
+            with self.service.app_update_guard():
+                pass
+        job = custom.store.read(result['job_id'])
+        job['started_at'] = 0
+        custom.store.save(job)
+        with self.service.app_update_guard():
+            pass
+        self.assertEqual(custom.store.read(job['id'])['state'], 'failed')
+        self.assertFalse(custom.store.read(job['id'])['can_install'])
+        self.assertEqual(self.service.store.registered_states(), set())
+
+    def test_custom_state_respects_canonical_pending_marker(self):
+        custom = Service(self.root / 'custom', coordination_dir=self.root, platform=self.platform)
+        (self.root / 'app-update-pending.json').write_text('{}')
+        with self.assertRaisesRegex(RuntimeError, 'pending'):
+            custom.prepare_update('', 'ultimate2-receiver', 'release')
+        with self.assertRaisesRegex(RuntimeError, 'pending'):
+            with custom.worker_guard():
+                pass
+        self.platform.start_worker.assert_not_called()
+
+    def test_shared_worker_guard_survives_deleted_custom_state_and_allows_later_pruning(self):
+        custom = Service(self.root / 'custom', coordination_dir=self.root, platform=self.platform)
+        with custom._queue_guard():
+            pass
+        with custom.worker_guard():
+            shutil.rmtree(custom.state_dir)
+            with self.assertRaises(RuntimeError):
+                with self.service.app_update_guard():
+                    pass
+        with self.service.app_update_guard():
+            pass
+        self.assertEqual(self.service.store.registered_states(), set())
+
+    def test_worker_waits_for_queue_lock_then_rechecks_pending_marker(self):
+        code = ('from pathlib import Path; from unittest.mock import Mock; '
+                'from eightbitdo.service import Service; import sys; '
+                's=Service(Path(sys.argv[1]),coordination_dir=Path(sys.argv[2]),platform=Mock()); '
+                'print("ready",flush=True); s.worker_guard().__enter__()')
+        environment = dict(os.environ)
+        environment['PYTHONPATH'] = str(Path(__file__).resolve().parent.parent)
+        with self.service.store.lock('application-mutation'):
+            process = subprocess.Popen([sys.executable, '-c', code, str(self.root / 'custom'), str(self.root)],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment)
+            try:
+                self.assertEqual(process.stdout.readline().strip(), 'ready')
+                self.assertIsNone(process.poll())
+                (self.root / 'app-update-pending.json').write_text('{}')
+            except BaseException:
+                process.kill()
+                process.communicate()
+                raise
+        output, errors = process.communicate(timeout=15)
+        self.assertNotEqual(process.returncode, 0)
+        self.assertIn('application update is pending', errors)
 
     def test_job_lock_excludes_another_process(self):
         # Exercise the native lock implementation on every CI operating system.

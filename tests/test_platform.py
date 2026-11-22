@@ -122,7 +122,7 @@ class LinuxPlatformTests(unittest.TestCase):
         platform.discover.return_value = []
         fwupd = Mock()
         fwupd.devices.return_value = []
-        service = Service(self.root, platform=platform, fwupd=fwupd)
+        service = Service(self.root, coordination_dir=self.root, platform=platform, fwupd=fwupd)
         self.assertEqual(service.scan_devices(), {'devices': [], 'warnings': []})
         platform.discover.assert_called_once_with()
         service.open_official_updater()

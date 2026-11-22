@@ -1,9 +1,11 @@
 import tempfile
+from contextlib import nullcontext
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from eightbitdo.jobs import JobStore
+from eightbitdo.service import Service
 from eightbitdo.worker import run
 
 
@@ -17,6 +19,7 @@ class RecoveryWorkerTests(unittest.TestCase):
         self.job.update(worker_action='recover', recovery_confirmed=True, recovery_ready=False)
         self.store.save(self.job)
         self.service = Mock(store=self.store)
+        self.service.worker_guard = nullcontext
 
     def test_recovery_dispatch_holds_job_lock_and_does_not_install(self):
         def recover(job):
@@ -48,6 +51,25 @@ class RecoveryWorkerTests(unittest.TestCase):
                 run(self.root, self.job['id'], 'install')
         self.service.run_install.assert_not_called()
         self.service.run_recover.assert_not_called()
+
+    def test_real_worker_guard_blocks_application_replacement_through_dispatch(self):
+        host = Mock()
+        host.worker_running.return_value = False
+        service = Service(self.root, coordination_dir=self.root, platform=host)
+
+        def recover(job):
+            with self.assertRaises(RuntimeError):
+                with service.app_update_guard():
+                    self.fail('Application replacement overlapped a firmware worker')
+            job['state'] = 'complete'
+            service.store.save(job)
+
+        service.run_recover = Mock(side_effect=recover)
+        with patch('eightbitdo.worker.Service', return_value=service):
+            run(self.root, self.job['id'], 'recover')
+        service.run_recover.assert_called_once()
+        with service.app_update_guard():
+            pass
 
 
 if __name__ == '__main__':
