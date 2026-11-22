@@ -1,54 +1,7 @@
 import { callable } from "@decky/api";
 
-export interface Device {
-  id: string;
-  name: string;
-  vid: string;
-  pid: string;
-  role: string;
-  model_id: string | null;
-  firmware_version: string | null;
-  status: string;
-  can_update: boolean;
-  reason: string;
-}
-
-export interface Model {
-  id: string;
-  name: string;
-  role: string;
-  instructions: string;
-  support: string;
-}
-
-export interface Release {
-  id: string;
-  version: string;
-  date: string;
-  notes: string;
-  downloadable: boolean;
-}
-
-export interface Job {
-  id: string;
-  state: string;
-  progress: number;
-  message: string;
-  can_install: boolean;
-  target_label?: string;
-  evidence_level?: string;
-  evidence?: string;
-  can_check_recovery?: boolean;
-  recovery_ready?: boolean;
-  recovery_action?: string;
-}
-
-export interface RecoveryAccess {
-  configured: boolean;
-  pending: boolean;
-  can_setup: boolean;
-  message: string;
-}
+import type { Device, Job, Model, RecoveryAccess, Release } from "./shared/types";
+export type { Device, Job, Model, RecoveryAccess, Release } from "./shared/types";
 
 export const scanDevices = callable<[], { devices: Device[]; warnings: string[] }>("scan_devices");
 export const getModels = callable<[], Model[]>("get_models");

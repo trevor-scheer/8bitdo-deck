@@ -6,8 +6,11 @@ import {
   getRecoveryAccess, installUpdate, openOfficialUpdater, prepareUpdate, recoverUpdate, scanDevices, setupRecoveryAccess,
 } from "./api";
 
+import { DevicePicture } from "./shared/DevicePicture";
+import { theme, progressValue } from "./shared/theme";
+
 const LAST_JOB = "8bitdo-deck:last-job";
-const textStyle = { fontSize: 13, lineHeight: 1.5, overflowWrap: "anywhere" as const, margin: "8px 0" };
+const textStyle = { color: theme.text, fontSize: 13, lineHeight: 1.5, overflowWrap: "anywhere" as const, margin: "8px 0" };
 
 interface Selection {
   deviceId: string;
@@ -239,6 +242,10 @@ function Content() {
   };
 
   return <>
+    <div style={{ margin: "8px 16px 18px", padding: 16, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: theme.radius }}>
+      <div style={{ color: theme.accent, fontSize: 10, fontWeight: 700, letterSpacing: 1.5 }}>8BITDO UPDATER</div>
+      <p style={{ ...textStyle, marginBottom: 0 }}>Controller and receiver firmware.<br />One place to check updates.</p>
+    </div>
     <PanelSection title="Devices">
       <PanelSectionRow>
         <ButtonItem layout="below" disabled={scanning || busy || jobActive} onClick={() => void scan()}>
@@ -247,6 +254,13 @@ function Content() {
       </PanelSectionRow>
       {!scanning && !devices.length && <p style={textStyle}>Connect your controller or receiver by USB, then scan. You can also browse firmware by model below.</p>}
       {devices.map((item) => <PanelSectionRow key={item.id}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", margin: "8px 0 2px", background: theme.surface, border: `1px solid ${item.id === deviceId ? theme.accent : theme.border}`, borderRadius: theme.radius }}>
+          <DevicePicture modelId={item.model_id} name={item.name} size={88} />
+          <div>
+            <span style={{ color: theme.accent, fontSize: 11, textTransform: "capitalize" }}>{item.role}</span>
+            <p style={{ ...textStyle, margin: "4px 0", fontSize: 12 }}>{item.firmware_version ? `Firmware ${item.firmware_version}` : "Version unknown"}</p>
+          </div>
+        </div>
         <ButtonItem
           layout="below"
           disabled={busy || jobActive}
@@ -277,6 +291,9 @@ function Content() {
         />
       </PanelSectionRow>
       {model && <>
+        <div style={{ textAlign: "center", background: theme.surface, borderRadius: theme.radius, padding: 8 }}>
+          <DevicePicture modelId={model.id} name={model.name} size={150} />
+        </div>
         <p style={textStyle}>{model.instructions}</p>
         <p style={textStyle}>{model.support}</p>
         {!device && <p style={textStyle}>Browsing firmware only. Selecting a model does not confirm that it matches connected hardware.</p>}
@@ -315,7 +332,7 @@ function Content() {
     {job && <PanelSection title="Update progress">
       {job.target_label && <p style={{ ...textStyle, fontWeight: "bold" }}>{job.target_label}</p>}
       <p style={textStyle}>{job.message}</p>
-      <progress aria-label="Update progress" value={Math.max(0, Math.min(100, job.progress))} max={100} style={{ width: "100%" }} />
+      <progress aria-label="Update progress" value={progressValue(job.progress)} max={100} style={{ width: "100%", accentColor: theme.accent }} />
       {job.evidence_level === "source-reviewed-experimental" && <p style={textStyle}>Experimental update: the protocol has been reviewed, but a complete update has not yet been validated on hardware.</p>}
       {job.can_install && !confirmInstall && <PanelSectionRow>
         <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => setConfirmInstall(true)}>Review installation</ButtonItem>
