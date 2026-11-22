@@ -1,18 +1,23 @@
 # 8BitDo Updater
 
-A shared Linux firmware updater for 8BitDo controllers and accessories, with a standalone command-line application, a Python API, and the **8BitDo Deck** Decky frontend.
+A firmware companion for 8BitDo controllers and accessories, with a desktop app for Linux, macOS, and Windows, a standalone CLI, a Python API, and the **8BitDo Deck** frontend for Steam Deck. All frontends use the same backend and firmware policy.
 
-**Early development build.** Discovery, firmware browsing, package validation, and update jobs are implemented. **Two experimental native receiver updates are available:** Ultimate 2 Wireless 1.01 → official 1.06 and original Ultimate Bluetooth 1.03 → official 1.04. Each requires its exact reviewed image and matching preflight. No native update is hardware-qualified. Controller updates, wireless firmware writes, and other native version combinations remain blocked. No firmware image has been erased, written, or committed during this project's validation.
+**Early development build.** Discovery, firmware browsing, package validation, and update jobs are implemented. **On Linux, two experimental native receiver updates are available:** Ultimate 2 Wireless 1.01 → official 1.06 and original Ultimate Bluetooth 1.03 → official 1.04. Each requires its exact reviewed image and matching preflight. No native update is hardware-qualified. Controller updates, wireless firmware writes, and other native version combinations remain blocked. No firmware image has been erased, written, or committed during this project's validation.
 
 ## Use it
 
 Download a package from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases):
 
-- **Standalone Linux executable:** use the command line without installing Python or Decky. Choose the binary for your CPU architecture.
+- **Desktop application:** AppImage for Linux, DMG for macOS, or installer/portable ZIP for Windows. No Python or Decky installation is required.
+- **Standalone CLI:** native executables for the same platforms, with Python bundled.
 - **Python wheel or source distribution:** integrate the shared backend into another application, or install the CLI in a Python environment.
 - **`8bitdo-deck.zip`:** use the same backend through Decky's Gaming Mode interface.
 
-Follow the [installation guide](docs/install.md) for requirements, package verification, and setup. The executable targets Linux; macOS and Windows device backends are not implemented. The repository and Decky plugin retain the `8bitdo-deck` name.
+Follow the [installation guide](docs/install.md) for requirements, package verification, and setup. Linux and macOS packages cover x86-64 and ARM64; Windows packages cover x86-64. The repository and Decky plugin retain the `8bitdo-deck` name.
+
+**macOS and Windows currently support discovery, reviewed identity/version queries, firmware browsing, and downloads. Firmware installation, boot transitions, and receiver recovery remain disabled on those hosts until their USB reconnect and recovery behavior is validated.** Native package builds do not establish firmware-update qualification.
+
+Install 0.3 manually once if you use 0.2: the older release has no app-update mechanism. New desktop and standalone installations can check signed [application updates](docs/self-updates.md). Updating the application is separate from installing controller firmware. macOS and Windows packages currently lack Developer ID/notarization and Authenticode publisher signing; TUF signatures for app updates do not provide those OS identities.
 
 The shared backend provides:
 
@@ -24,9 +29,11 @@ The shared backend provides:
 - Automatic recognition of SteamOS recovery USB access, without terminal commands or administrator setup. Other Linux systems can use a scoped installer through the normal administrator prompt.
 - Sanitized diagnostic exports and a launcher for the official web updater. Website support and WebHID-capable browser availability vary by model and host.
 
-The dock is not assumed to be a separate firmware target. Its receiver has its own firmware.
+The dock is not assumed to be a separate firmware target. Its receiver has its own firmware. The desktop and Decky interfaces share original, model-specific SVG illustrations; illustrated colors do not identify a connected device or hardware revision.
 
 ## Support status
+
+The native firmware transactions and hardware observations below apply to Linux/SteamOS. A native macOS source test run completed 323 tests with 109 Linux-only skips; HTTPS catalog access and loading HIDAPI also passed. No 8BitDo device was attached to that Mac, so those checks do not validate device communication or firmware installation on macOS.
 
 | Device or route | Implemented | Hardware validation |
 | --- | --- | --- |
@@ -59,9 +66,9 @@ eightbitdo job JOB_ID
 
 Replace `RELEASE_ID` with an ID returned by `releases` and `JOB_ID` with the ID returned by `prepare`. Add `--device-id DEVICE_ID` to preparation to bind it to an identified device from `scan`; preparation without a device browses/downloads only. Installation still requires an eligible job and explicit confirmation.
 
-The Python package requires Python 3.11 or later; the standalone executable includes its interpreter. `python3 -m eightbitdo` and the installed `eightbitdo-deck` command remain available. All frontends share the existing `~/.local/state/eightbitdo-deck/` state directory by default, including device locks and update jobs.
+The Python package requires Python 3.11 or later; the standalone executable includes its interpreter. `python3 -m eightbitdo` and the installed `eightbitdo-deck` command remain available. On Linux, all frontends share the existing `~/.local/state/eightbitdo-deck/` state directory by default, including device locks and update jobs. macOS and Windows use their per-user application state locations.
 
-Use the [public API](docs/api.md) to build another frontend. See the [architecture](docs/architecture.md) for the boundary between firmware logic, Linux services, and the CLI/Decky adapters. No network daemon is required.
+Use the [public API](docs/api.md) to build another frontend. See the [architecture](docs/architecture.md) for the boundary between firmware logic, host services, and the desktop/CLI/Decky adapters. No network daemon is required.
 
 ## Development
 
@@ -73,6 +80,9 @@ pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run build
 pnpm run test:ui
+pnpm run build:desktop
+pnpm exec playwright install chromium
+pnpm run test:desktop
 python3 scripts/package.py
 ```
 

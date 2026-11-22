@@ -1,45 +1,77 @@
 # Install 8BitDo Updater
 
-8BitDo Updater shares its backend between a standalone Linux CLI, a Python API, and the 8BitDo Deck Decky plugin. Choose one or more frontends; their firmware compatibility checks, jobs, locks, and recovery rules are the same.
+8BitDo Updater shares its backend between a desktop application, a standalone CLI, a Python API, and the 8BitDo Deck Decky plugin. Choose one or more frontends; their firmware compatibility checks, jobs, locks, and recovery rules are the same.
 
-This is an early development build. Legacy installation through fwupd requires a supported 8BitDo device already in bootloader mode and a unique, trusted upgrade release. Two source-reviewed experimental native updates are enabled after matching preflight: Ultimate 2 Wireless receiver stable 1.01 → official 1.06 and original Ultimate Bluetooth receiver stable 1.03 → official 1.04. Each permits only its exact reviewed image. Native controller, wireless, and other version combinations remain blocked. No native update is hardware-qualified; see the [protocol requirements](protocol.md#authorization-and-hardware-qualification).
+This is an early development build. Legacy installation through fwupd requires a supported 8BitDo device already in bootloader mode and a unique, trusted upgrade release. On Linux, two source-reviewed experimental native updates are enabled after matching preflight: Ultimate 2 Wireless receiver stable 1.01 → official 1.06 and original Ultimate Bluetooth receiver stable 1.03 → official 1.04. Each permits only its exact reviewed image. Native controller, wireless, and other version combinations remain blocked. No native update is hardware-qualified; see the [protocol requirements](protocol.md#authorization-and-hardware-qualification).
 
-## Linux requirements
+## Choose a package
 
-The native executable includes Python; the Python package requires Python 3.11 or later. Neither standalone route requires Decky. macOS and Windows hardware access is not implemented.
+Download from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases). Version `0.3.0-alpha.1` uses `0.3.0a1` in asset filenames:
 
-Release executables are built on Ubuntu 22.04 for x86-64 and ARM64 and require glibc 2.35 or later. Steam Deck uses the x86-64 package. These are Linux executables bundled with Python, not fully static binaries; musl-based systems such as Alpine are outside this binary compatibility target. HTTPS catalog access and downloads use the host's trusted CA certificates.
+| Host | Desktop package | CLI package |
+| --- | --- | --- |
+| Linux x86-64, including Steam Deck | `8BitDo-Updater_0.3.0a1_linux-x86_64.AppImage` | `eightbitdo-updater-0.3.0a1-linux-x86_64.tar.gz` |
+| Linux ARM64 | `8BitDo-Updater_0.3.0a1_linux-aarch64.AppImage` | `eightbitdo-updater-0.3.0a1-linux-aarch64.tar.gz` |
+| macOS Apple Silicon | `8BitDo-Updater_0.3.0a1_macos-aarch64.dmg` | `eightbitdo-updater-0.3.0a1-macos-aarch64.tar.gz` |
+| macOS Intel | `8BitDo-Updater_0.3.0a1_macos-x86_64.dmg` | `eightbitdo-updater-0.3.0a1-macos-x86_64.tar.gz` |
+| Windows x86-64 | `8BitDo-Updater_0.3.0a1_windows-x86_64-setup.exe` or `-portable.zip` | `eightbitdo-updater-0.3.0a1-windows-x86_64.zip` |
 
-Run the updater as your normal desktop user. Device operations require access to the relevant Linux HID nodes. Native installation and recovery also require a working systemd user manager, `systemd-run`, and `systemd-inhibit` so the worker can prevent suspend. Those operations fail before writing if the required launcher is unavailable. The bundled executable does not replace these host services.
+Desktop and CLI packages bundle Python. They do not require Decky. Install version 0.3 manually once if you currently use 0.2; that release cannot check for app updates.
 
-`fwupd` is optional and supplies its own supported-device path and authorization policy. The official web updater needs a compatible browser; the website is not a universal recovery fallback. Receiver recovery access is described [below](#receiver-recovery-access).
+Linux retains its reviewed experimental firmware-installation paths. macOS and Windows support USB discovery, allowlisted identity/version queries, firmware browsing, and downloads. Native firmware writes, boot-mode transitions, and recovery are disabled there until physical-device correlation and reconnect behavior are validated. The interfaces show these limits; selecting another frontend does not bypass them.
+
+## Verify the download
+
+Download `SHA256SUMS` alongside the package. On Linux, check the files present in that directory:
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+On macOS, run `shasum -a 256 ASSET_FILE`; in Windows PowerShell, run `Get-FileHash .\ASSET_FILE -Algorithm SHA256`. Replace `ASSET_FILE` with the downloaded filename and compare the complete digest with its entry in `SHA256SUMS`.
+
+The [release procedure](releasing.md#verify-a-release-download) describes GitHub build-attestation verification. A checksum alone does not authenticate the publisher. Current macOS and Windows packages do not have Apple Developer ID/notarization or Windows Authenticode signatures, so the OS can show an unidentified-publisher warning or block launch. Signed TUF app updates authenticate update metadata and payloads; they do not remove those OS prompts.
+
+## Install the desktop application
+
+- **Linux/Steam Deck:** save the AppImage in a stable, user-owned location. In Desktop Mode, mark it executable in the file properties, or run `chmod +x ASSET_FILE.AppImage`, then launch it. Linux packages target glibc 2.35 or later; musl-based systems such as Alpine are outside the binary target. The [AppImage bundles the desktop dependencies](https://v2.tauri.app/distribute/appimage/). If the host lacks the FUSE runtime needed to mount an AppImage, install that runtime through the host's package manager before using the app.
+- **macOS:** open the DMG and copy **8BitDo Updater.app** to Applications or another stable application directory you can write. The build targets macOS 11 or later. Use the package for your Mac's CPU architecture.
+- **Windows:** run the `-setup.exe` installer for a per-user installation. Alternatively, extract the complete `-portable.zip` into a writable directory and run `eightbitdo-updater.exe`. Keep `eightbitdo.exe` and the license files alongside it. The desktop requires WebView2; the installer provisions that runtime when needed.
+
+Open **My devices** and connect a controller or receiver by USB. **Scan devices** refreshes connected components; **Device library** browses models without identifying attached hardware. Controller and receiver firmware versions stay separate. Original SVG illustrations distinguish models, but their colors are illustrative and are not used for identification.
+
+Review the selected component and release notes, then choose **Prepare firmware** to download and validate a release. Preparation does not write firmware. Eligible Linux jobs offer **Review installation**, followed by **Confirm firmware installation**. The backend rechecks the device and exact image before writing. The [firmware procedure](#prepare-and-install-firmware) covers evidence limits and recovery.
+
+Use **App settings** for application updates, recovery-access setup, diagnostics, and the official web updater. The browser option supports only the models handled by that website.
 
 ## Install the standalone executable
 
-1. Download the matching archive and `SHA256SUMS` from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases). Use `uname -m` to check the host architecture: `x86_64` uses the x86-64 archive and `aarch64` uses ARM64.
-2. Check the downloaded archive against the release checksums. The command below verifies the files present in the current directory:
+Extract the matching CLI archive. For Linux x86-64:
 
-   ```sh
-   sha256sum --check --ignore-missing SHA256SUMS
-   ```
+```sh
+tar -xzf eightbitdo-updater-0.3.0a1-linux-x86_64.tar.gz
+cd eightbitdo-updater-0.3.0a1-linux-x86_64
+./eightbitdo --version
+./eightbitdo info
+```
 
-3. Extract the archive. For the 0.2.0 alpha x86-64 package:
+Use the equivalent macOS archive, or extract the Windows ZIP and run `.\eightbitdo.exe --version` and `.\eightbitdo.exe info` in PowerShell. These commands do not probe hardware.
 
-   ```sh
-   tar -xzf eightbitdo-updater-0.2.0a1-linux-x86_64.tar.gz
-   ```
+You can place the executable in a user-owned directory on your `PATH`. Keep its path stable while jobs are running, and retain the notices and licenses when redistributing it. HTTPS catalog access and downloads use the host's trusted CA certificates.
 
-4. Enter the extracted directory and check the executable:
+## Linux firmware requirements
 
-   ```sh
-   cd eightbitdo-updater-0.2.0a1-linux-x86_64
-   ./eightbitdo --version
-   ./eightbitdo info
-   ```
+Run the updater as your normal desktop user. Device operations require access to the relevant HID nodes. Native installation and recovery also require a working systemd user manager, `systemd-run`, and `systemd-inhibit` so workers can prevent suspend. Those operations fail before writing if the protected launcher is unavailable. Bundled executables do not replace these host services.
 
-   These commands do not probe hardware. Keep the accompanying notices and license files when redistributing the archive.
+`fwupd` is optional and supplies its own supported-device path and authorization policy. Receiver recovery access is described [below](#receiver-recovery-access).
 
-The archive's executable can be installed in a user-owned directory on your `PATH`; it does not require an administrator installer. Keep it at a stable path while jobs are running. The [release procedure](releasing.md#verify-a-release-download) also describes verification of the GitHub build attestation. A checksum proves that the downloaded bytes match the manifest; it does not by itself authenticate the publisher or prove that a firmware update is safe.
+## Update the application
+
+In desktop **App settings**, choose a release channel, select **Check for app updates**, and review the available version. **Confirm app update** downloads and verifies the application package. When it is staged, use **Quit to finish updating**, then reopen the app. Closing finishes an application replacement; it does not confirm a controller firmware update.
+
+Application replacement is blocked while firmware work is active. If the app reports an interrupted application update, its rollback action requires separate confirmation. See [application self-updates](self-updates.md) for supported installation layouts, CLI commands, waiting limits, and recovery.
+
+Source checkouts, Python environments, and Decky use their original installation method for upgrades. Desktop app updates replace the frontend and its bundled backend together; they do not update a separately installed CLI or Decky plugin.
 
 ## Install the Python package
 
@@ -50,6 +82,8 @@ python3 -m venv ~/.local/share/eightbitdo-venv
 ~/.local/share/eightbitdo-venv/bin/python -m pip install ./WHEEL_FILE
 ~/.local/share/eightbitdo-venv/bin/eightbitdo --version
 ```
+
+On Windows, create a virtual environment with `python -m venv .venv`, then use `.\.venv\Scripts\python.exe -m pip install .\WHEEL_FILE` and `.\.venv\Scripts\eightbitdo.exe --version`.
 
 Replace `WHEEL_FILE` with the downloaded `eightbitdo_updater-…-py3-none-any.whl` filename. Activate that environment or use its full executable path for later commands. The distribution name is `eightbitdo-updater`; the Python import remains `eightbitdo`. The `eightbitdo-deck` executable remains an alias for existing users.
 
@@ -111,7 +145,7 @@ The first command only checks access configuration. The second requests administ
 
 ## Prepare and install firmware
 
-The plugin automatically selects the first identified component and loads its matching firmware releases. If multiple components are connected, you can select another one from the device list. Controller and receiver firmware are separate. Manual model browsing remains available, but choosing a model manually does not prove that it matches attached hardware.
+The desktop app and plugin automatically select the first identified component and loads its matching firmware releases. If multiple components are connected, you can select another one from the device list. Controller and receiver firmware are separate. Manual model browsing remains available, but choosing a model manually does not prove that it matches attached hardware.
 
 **Prepare firmware** does not write to a device. For vendor firmware it downloads and validates the image. For fwupd it prepares a trusted release plan; fwupd downloads and validates the firmware when installation begins.
 
@@ -169,10 +203,12 @@ From the CLI, use `eightbitdo check-recovery JOB_ID` for inspection. Read the re
 
 ## State, diagnostics, and removal
 
-Use **Export diagnostics** to save the discovered device information and warnings. The plugin displays the saved path. Runtime state normally lives in `~/.local/state/eightbitdo-deck/`, or under `$XDG_STATE_HOME/eightbitdo-deck/` if that variable is set.
+Use **Export diagnostics** to save the discovered device information and warnings. The plugin displays the saved path. On Linux, runtime state normally lives in `~/.local/state/eightbitdo-deck/`, or under `$XDG_STATE_HOME/eightbitdo-deck/` if that variable is set. macOS and Windows use the per-user state directory selected by `platformdirs` for `8BitDo Updater`. Desktop and CLI share the default state on each host.
 
 Use Decky's plugin settings to uninstall 8BitDo Deck. Decky removes plugin files; downloaded firmware, diagnostics, and job records can remain in the state directory. Remove those files only after all update jobs have finished.
 
 The CLI uses the same state directory and can export diagnostics with `eightbitdo diagnostics`. Use the global `--state-dir PATH` option before the command only when you intentionally need a separate state directory. Separate directories do not share jobs or locks, so do not run them against the same device concurrently. Existing Decky jobs and cached firmware need no migration when using the default location.
 
 To remove the standalone executable, remove its installed file after all jobs finish. To remove the Python package, uninstall `eightbitdo-updater` from its environment or remove that dedicated environment. Neither action removes firmware caches, job records, or installed udev rules. Do not replace or delete the executable or its environment while an update worker is running.
+
+To remove the desktop application, wait for firmware and application-update jobs to finish. Delete the Linux AppImage or macOS app; use the Windows uninstaller for an installer-based installation, or remove the complete portable directory. Cached firmware, diagnostics, and job records remain in the user state directory.

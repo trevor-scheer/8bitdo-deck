@@ -1,49 +1,63 @@
 # Shared updater architecture
 
-The project keeps firmware logic in a shared Python backend and treats the command line and Decky as frontends. Another frontend can use the same public API without implementing firmware policy or depending on Decky. The standalone executable bundles the Python interpreter; it does not change the firmware transaction.
+The Python backend owns device identity, firmware policy, jobs, and recovery. The desktop application, CLI, Python API, and Decky are frontends. Packaging the backend with Python lets users run it without installing an interpreter; Rust provides the desktop shell without rewriting the firmware protocols.
 
 ```mermaid
 flowchart TD
-    CLI[Standalone CLI] --> API[Public API v1]
+    Desktop[React desktop UI] --> Rust[Tauri command boundary]
+    Rust --> Sidecar[Bundled Python CLI]
+    Sidecar --> API[Public API v1]
+    CLI[Standalone CLI] --> API
     Decky[8BitDo Deck adapter] --> API
     Client[Python application] --> API
     API --> Service[Update service and persistent jobs]
     Service --> Firmware[Catalog, protocols, and authorizations]
-    Service --> Linux[Linux platform services]
-    Linux --> USB[HID devices and reconnect]
-    Linux --> Host[User workers, permissions, and browser]
+    Service --> Host[Platform services]
+    Host --> Linux[Linux HID and protected firmware workers]
+    Host --> Other[macOS and Windows HIDAPI discovery]
+    Service --> AppUpdates[tufup application updates]
 ```
 
-## Public boundary
+## Frontend boundaries
 
-`eightbitdo.api.UpdaterAPI` is the frontend boundary. It exposes a fixed set of operations, validates their parameters and confirmation requirements, and returns versioned JSON results or errors. The CLI's `api` command exposes the same contract to processes that cannot import Python. Neither route starts a network server.
+`eightbitdo.api.UpdaterAPI` exposes a fixed operation set, validates parameters and confirmations, and returns versioned JSON results or errors. The CLI's `api` command exposes that contract to other processes. No network daemon is required. Ordinary CLI commands preserve their direct JSON output; integrations should use the [versioned API envelope](api.md).
 
-The Decky adapter translates its existing calls through that boundary. The plugin keeps its name and UI, but does not own device compatibility decisions. Ordinary CLI commands preserve their direct JSON output for existing callers; integrations should use the versioned envelope described in [the API reference](api.md).
+The desktop React app is built with Vite. Its Rust shell accepts only allowlisted operations and passes parameters as one JSON argument to the packaged `eightbitdo` sidecar. The webview has no generic shell-execution permission. Browser previews cannot access devices. The sidecar returns API envelopes; the shell checks their version before returning them to React.
 
-`Service` orchestrates catalog selection, preparation, installation, and recovery. It and the protocol modules enforce exact firmware/source authorizations, target checks, locking, verification, and reconnect checks. A frontend confirmation permits the requested operation to be considered; it cannot make incompatible firmware installable.
+Decky keeps its existing adapter and controller-focus controls. The desktop and Decky share types, visual tokens, and artwork in `src/shared/`. The original SVG illustrations depict specific models; colors are illustrative and never identify hardware. Firmware support decisions remain in the backend.
+
+The packaged desktop's `--smoke-test` mode creates no webview. It calls only sidecar `info`, checks the API/application versions, and exits. It cannot mount the React app or trigger its initial device scan.
 
 ## Platform boundary
 
-`eightbitdo.platform.LinuxPlatform` owns host-dependent operations such as worker launch, process liveness, browser selection, and access to the Linux discovery/transport/reconnect helpers. `Service(..., platform=...)` accepts a platform implementation so tests and future ports can replace those operations without duplicating the update workflow. `eightbitdo.runtime` handles frozen-process detection and sanitizes the environment passed to host executables.
+`eightbitdo.platform.current_platform()` chooses `LinuxPlatform` or `DesktopPlatform`. `Service(..., platform=...)` accepts an implementation for testing. Platform services own device access, worker launch/liveness, permissions, and browser integration; `eightbitdo.runtime` handles frozen-process detection and sanitizes the environment passed to host executables.
 
-The shipped implementation still uses Linux HID, sysfs, udev access policy, and systemd user services. Persistent job locking uses POSIX `fcntl`, and worker process identity uses Linux process information outside the adapter. A macOS or Windows port therefore needs storage/worker changes as well as a platform implementation. It must preserve physical-device correlation, locking, permission checks, suspend prevention, and worker behavior, and must be tested on that OS before making a support claim.
+Linux uses hidraw/sysfs, its existing device-correlation and reconnect logic, scoped udev access, and systemd user services. macOS and Windows use HIDAPI for discovery and reviewed runtime identity/version queries. They support firmware catalogs and preparation, but refuse native writes, boot transitions, recovery, fwupd, and extended wireless probes. Making those operations available requires host-specific physical-port correlation, boot/reconnect validation, suspend prevention, and hardware evidence; sharing the transport interface does not establish those properties.
 
-Permission setup is a separately authorized host action. The plugin and standalone application run as the desktop user. Recovery rules remain restricted to the reviewed interfaces; packaging does not grant wider USB access or enable additional firmware targets.
+`info.capabilities` reports the host boundary. Individual jobs still require their own compatible device, exact source/destination image authorization, and access checks. A true platform capability is not a hardware qualification.
+
+`eightbitdo.locking` uses POSIX file locks on Linux/macOS and portalocker on Windows. Worker identity uses Linux process start information or psutil creation time on macOS/Windows, preventing PID reuse from masquerading as the original worker.
 
 ## Jobs and process lifetime
 
-Frontends submit work and poll persistent jobs. By default, every frontend uses `~/.local/state/eightbitdo-deck/`, or the equivalent under `$XDG_STATE_HOME`. The original directory name is retained to preserve existing jobs, caches, and locks. Avoid simultaneous use of separate state directories against the same device because their locks are independent.
+Frontends submit background work and poll durable jobs. Linux retains `~/.local/state/eightbitdo-deck/`, or `$XDG_STATE_HOME/eightbitdo-deck/`, so existing jobs and caches need no migration. macOS and Windows use `platformdirs.user_state_path("8BitDo Updater", appauthor=False)`. Frontends on the same host share default state and locks. Separate state directories have independent locks and must not target the same hardware concurrently.
 
-Preparation does not flash. Installation and applicable recovery workers run through the systemd user manager with suspend inhibition. The application fails rather than proceeding without the required protection. The worker retains its original target/source context, revalidates the cached image and authorization, and verifies the destination version before reporting completion.
+Preparation does not flash. Eligible Linux installation and recovery workers run through the systemd user manager with suspend inhibition. The backend refuses to write without that protection. A worker retains target/source context, revalidates the cached image and authorization, and checks the returning device version before reporting completion.
 
-Source and installed-Python launches use the same interpreter as the calling application. The standalone frozen executable reexecutes itself in a private worker mode with `PYINSTALLER_RESET_ENVIRONMENT=1`, instead of depending on a system Python installation. Decky's frozen host is detected separately and uses the host's Python to launch the packaged backend. The private worker entry is not a public API operation and does not remove job-state or recovery-confirmation checks. An independently launched frozen worker owns its extraction lifetime so closing the submitting CLI cannot remove files the worker still needs.
+Source and installed-Python workers use the calling interpreter. A frozen executable reexecutes its own private worker mode with `PYINSTALLER_RESET_ENVIRONMENT=1` and an independent extraction lifetime. Decky's frozen host is detected separately and launches the packaged backend using host Python. Preparation workers detach with a new POSIX session or Windows detached-process flags. Closing a frontend does not intentionally cancel submitted workers; interruption does not trigger automatic firmware retries.
 
-Closing a frontend is distinct from deleting or replacing its executable, environment, or plugin files. Keep those files and the USB/power connection intact while a job runs. A stopped worker is reported as an interruption; it does not cause an automatic firmware retry.
+Keep application files, USB, and power intact while firmware jobs run. Application self-updates use an interprocess exclusion lock and reject queued or active firmware work. A pending app replacement blocks new firmware jobs until it completes or is recovered.
+
+## Application update boundary
+
+`eightbitdo.selfupdate` uses tufup/TUF to verify signed application metadata and payloads. Each product/OS/architecture has a separate repository history. The trusted application identity and install path come from the running executable; the desktop shell supplies its own fixed installation path and PID. Frontend API callers cannot choose arbitrary update servers or destinations.
+
+A desktop update replaces the complete AppImage, macOS `.app`, or Windows application directory, including the sidecar. It stages verified files, waits for the GUI and sidecar to exit, and retains a backup during replacement. This is separate from firmware download or installation. Details, pending-update recovery, and key rotation are in [application self-updates](self-updates.md).
 
 ## Distribution boundaries
 
-The Python wheel/source distribution contains the backend, CLI, and `eightbitdo/resources/install-udev-rules.sh`. The PyInstaller executable contains the same Python application and runtime. The Decky ZIP contains the shared backend plus its frontend assets and adapter; the previous `scripts/install-udev-rules.sh` entrypoint forwards to the packaged helper. Firmware downloads, private captures, and device dumps are not release inputs.
+The Python wheel/source distribution contains the shared backend, CLI, permission helper, and public update-trust resources. PyInstaller bundles the Python runtime and platform dependencies. Tauri bundles the desktop UI and that executable. The Decky ZIP contains its frontend, adapter, and shared backend; its existing permission-helper entrypoint remains available.
 
-The Linux executable still depends on its documented host ABI and system services. Optional `fwupd` support uses the host's service and trust policy. Opening a browser is a convenience operation; it is not a verified recovery route for every model.
+Firmware images, private captures, and device dumps are not release inputs. Application versions, OS installers, TUF signatures, and build attestations do not broaden the firmware authorization registry. macOS and Windows packages currently lack OS publisher signing/notarization; TUF signatures authenticate app updates independently of those mechanisms.
 
-Build and release procedures are in [releasing.md](releasing.md). Device support and hardware qualification remain governed by [protocol.md](protocol.md#authorization-and-hardware-qualification), independently of which frontend or package is used.
+See [releasing.md](releasing.md) for builds and [protocol.md](protocol.md#authorization-and-hardware-qualification) for firmware qualification requirements.

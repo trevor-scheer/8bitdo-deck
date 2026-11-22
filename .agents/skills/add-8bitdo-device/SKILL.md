@@ -66,15 +66,15 @@ Use the repository's existing boundaries:
 | --- | --- |
 | Public frontend contract | `eightbitdo/api.py`; see [API reference](../../../docs/api.md) |
 | Model and component catalog | `eightbitdo/registry.py`, `catalog.py` |
-| Discovery and identity | `eightbitdo/discovery.py`, `protocol.py`, `transport.py` |
+| Discovery and identity | `eightbitdo/discovery.py`, `hidapi_backend.py`, `protocol.py`, `transport.py` |
 | Family-specific transactions | `protocol.py`, `legacy_protocol.py`, `wireless.py`, or a separate module for incompatible semantics |
 | Reconnect and recovery | `connection.py`, `recovery.py`, `access.py` |
-| Linux host integration | `eightbitdo/platform.py`, `runtime.py`; see [architecture](../../../docs/architecture.md) |
+| Host integration | `eightbitdo/platform.py`, `runtime.py`, `locking.py`; see [architecture](../../../docs/architecture.md) |
 | Durable jobs and workers | `service.py`, `jobs.py`, `worker.py` |
 | Reviewed write policy | `qualifications.py` and the applicable authorization type |
-| Contributor/user behavior | `src/api.ts`, `src/index.tsx`, `main.py`, `cli.py`, support and install docs |
+| Frontends and model artwork | `desktop/`, `src-tauri/`, `src/shared/`, `src/api.ts`, `src/index.tsx`, `main.py`, `cli.py`, support and install docs |
 
-Implement firmware behavior in the shared backend so the CLI, Python API, and Decky use the same policy. Keep host-specific behavior at the platform boundary; packaging a binary does not establish support for another OS. Do not extend receiver-specific service/recovery allowlists to a controller without implementing and testing that controller's policy. For native implementations, preserve these invariants (the existing `fwupd` route instead relies on its supported-device and trusted-release policy):
+Implement firmware behavior in the shared backend so the desktop app, CLI, Python API, and Decky use the same policy. Keep host-specific behavior at the platform boundary; packaging a binary does not establish firmware support for another OS. macOS and Windows currently permit discovery/identity/downloads only; keep native-write, boot/reconnect, and recovery gates closed until those paths have their own validation. Map device illustrations by model ID, never by color or appearance. Do not extend receiver-specific service/recovery allowlists to a controller without implementing and testing that controller's policy. For native implementations, preserve these invariants (the existing `fwupd` route instead relies on its supported-device and trusted-release policy):
 
 - Match the opened HID descriptor, USB identity, and original physical port. Requery the firmware target before mutation and require stable source-version/revision compatibility.
 - Validate the unchanged cached image and exact compiled authorization again in the worker. UI choices and downloaded metadata cannot create authorizations. Preserve the experimental versus hardware-validated evidence label.
@@ -91,7 +91,7 @@ Follow [the validation procedure](references/validation.md): offline tests first
 
 Add meaningful regression coverage beside the relevant existing tests. Exercise wrong target/source/image, ambiguous identity, malformed replies, timeouts/disconnects, checksum/readback failures, geometry bounds, duplicate/unsupported actions, cache changes, and same-port reconnect/recovery. Assert that failures send no later destructive commands. Use simulated failures rather than unplugging a device during an update by default.
 
-Run the affected tests while iterating. Before submission, run the repository's [Checks workflow](../../../.github/workflows/checks.yml) locally where possible:
+Run the affected tests while iterating. Before submission, install the project runtime dependencies in a virtual environment and run the repository's [Checks workflow](../../../.github/workflows/checks.yml) locally where possible. The [release build instructions](../../../docs/releasing.md#build-locally) include environment setup:
 
 ```sh
 python3 -m unittest discover -s tests -v
@@ -99,6 +99,9 @@ pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run build
 pnpm run test:ui
+pnpm run build:desktop
+pnpm exec playwright install chromium
+pnpm run test:desktop
 python3 scripts/package.py
 git diff --check
 ```

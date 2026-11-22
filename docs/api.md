@@ -1,6 +1,6 @@
 # Public updater API v1
 
-Use `eightbitdo.api.UpdaterAPI` when embedding the backend in Python. Use `eightbitdo api` when calling it from another language or application. Both use the same operation set and firmware policy as the CLI and Decky frontend. No Decky installation or network daemon is required.
+Use `eightbitdo.api.UpdaterAPI` when embedding the backend in Python. Use `eightbitdo api` when calling it from another language or application. Both use the same operation set and firmware policy as the desktop, CLI, and Decky frontends. No Decky installation or network daemon is required.
 
 ## Python interface
 
@@ -21,7 +21,7 @@ except APIError as error:
     print(error.code, str(error))
 ```
 
-`UpdaterAPI(state_dir=PATH)` chooses a different persistent state directory. Omit it to share the existing `eightbitdo-deck` state with the CLI and Decky. `service=...` supplies a service implementation for testing; frontend code should normally use the default service.
+`UpdaterAPI(state_dir=PATH)` chooses a different persistent state directory. Omit it to share default state with the desktop, CLI, and Decky. Linux preserves the existing `eightbitdo-deck` directory; macOS and Windows use their per-user `8BitDo Updater` state directory. `service=...` supplies a service implementation for testing; frontend code should normally use the default service.
 
 `request(operation, parameters=None, *, api_version=1)` returns a JSON-compatible envelope. `call(operation, **parameters)` is the convenience form for Python callers. A successful request returns:
 
@@ -71,15 +71,15 @@ Both `setup-recovery-access --confirm` and `api setup_recovery_access` wait up t
 
 ## Operations
 
-Call `info` for the supported API/application versions, platform support, and operation parameter descriptions. It does not create an update service or probe hardware. `--help` and `--version` likewise do not start a service or access devices.
+Call `info` for the supported API/application versions, platform support, capabilities, and operation parameter descriptions. It does not create an update service or probe hardware. `--help` and `--version` likewise do not start a service or access devices.
 
 | Operation | Parameters | Result and effects |
 | --- | --- | --- |
 | `info` | None | Application/API information and operation descriptions; no device probe. |
 | `scan_devices` | None | `{devices, warnings}`; queries allowlisted runtime identities. |
-| `probe_wireless` | None | Bounded identity results for reviewed radio routes; does not install firmware. |
+| `probe_wireless` | None | Bounded identity results for reviewed radio routes on Linux; does not install firmware. |
 | `get_models` | None | Model array, including available fwupd entries. |
-| `get_releases` | `model_id` | Release array for the selected component. |
+| `get_releases` | `model_id` | `{releases: [...]}` for the selected component. |
 | `prepare_update` | `model_id`, `release_id`; optional `device_id` | `{job_id}`; validates the selection and starts preparation. An omitted or empty device ID browses/downloads without identifying hardware. |
 | `get_job` | `job_id` | Public job status, evidence, installation/recovery capabilities, and progress. |
 | `install_update` | `job_id`, `confirmed` | Queues an eligible installation only when `confirmed` is exactly `true`. |
@@ -89,10 +89,32 @@ Call `info` for the supported API/application versions, platform support, and op
 | `setup_recovery_access` | `confirmed` | Requests host administrator authorization for scoped recovery access only when `confirmed` is exactly `true`; does not write firmware. |
 | `export_diagnostics` | None | Writes sanitized diagnostics and returns their local path. |
 | `open_official_updater` | None | Asks the host browser integration to open the official website. |
+| `check_app_update` | `channel` | Checks signed application metadata for `stable` or `alpha`; returns availability and any pending transaction. |
+| `apply_app_update` | `channel`, `version`, `confirmed` | Downloads/verifies the exact reviewed application version and installs or stages it only with `confirmed: true`. |
+| `recover_app_update` | `confirmed` | Rolls back or stages rollback of an interrupted application transaction only with `confirmed: true`. |
 
 An operation name cannot select a private service method or invoke a worker directly. Unknown parameters, wrong types, and unsupported API versions are rejected before the operation runs. Installation and recovery confirmations are boolean parameters, not strings or truthy integers.
 
 In the Python API and Decky adapter, `setup_recovery_access` returns immediately. Keep the same API instance alive and poll `get_recovery_access` while `pending` is true. Pending status and authorization errors belong to that instance; a separate process can inspect installed access configuration but cannot track another process's setup prompt. The CLI performs this polling before it exits.
+
+## Platform capabilities
+
+`platform_supported` means the host has discovery support, not that it can install firmware. The `capabilities` object contains:
+
+| Capability | Linux | macOS / Windows |
+| --- | --- | --- |
+| `discovery`, `identity_query`, `firmware_download` | `true` | `true` |
+| `native_write`, `recovery`, `fwupd`, `permission_setup`, `wireless_probe` | `true` | `false` |
+
+The values describe implemented host operations. They do not confirm that a particular device was found, that its image is authorized, or that a firmware update was tested. Linux operations still depend on actual permissions, host services, and per-device/job checks. macOS/Windows native writes and recovery stay disabled until their boot/reconnect behavior is validated.
+
+## Application update results
+
+Application-update checks return `current_version`, `channel`, `platform`, `arch`, `available_version`, `release_notes`, `state`, `can_apply`, `can_recover`, `restart_required`, and `message`. Pass the exact reviewed `available_version` as `version` when applying. A changed available version is rejected instead of silently replacing the user's choice.
+
+Check states include `unsupported`, `current`, `available`, `staged`, and `interrupted`. Installation or rollback can return `staged` while waiting for the desktop to close. Show the backend's message and a quit/reopen action; do not call a staged transaction complete. Offer rollback only when `can_recover` is true. Signature failures, expired metadata, and failed requests are errors, not an up-to-date result.
+
+Apply requests perform download and verification before returning, so show indeterminate progress while waiting. Firmware jobs and application replacement exclude each other in the backend. Neither app-update confirmation nor successful installation authorizes a firmware write. See the [self-update contract](self-updates.md#frontend-api) for result states, supported layouts, and recovery.
 
 ## Frontend responsibilities
 
