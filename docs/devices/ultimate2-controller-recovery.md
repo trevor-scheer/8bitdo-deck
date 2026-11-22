@@ -157,6 +157,14 @@ metadata comparisons before/after were identical. No firmware erase, program,
 initialization, or commit command was sent. This validates the software entry,
 read/inspect/reset, and unchanged-source return path only.
 
+A second bounded round trip on the same date validated boot command `C3`
+against 256 existing application bytes at `0x5000`. Its CRC16 result, `0x5b27`,
+matched an independent calculation from readback. The 66.47-second check
+returned to stable 1.10 with all 145,408 application bytes and metadata
+unchanged. A strict command wrapper allowed only identity, reads, this fixed
+checksum range, and one reset; no erase, program, initialization, or commit
+was permitted. This adds read-only checksum evidence, not a rescue-flash test.
+
 The running controller accepts USB report prefix `81 05 00 51 00`, padded to
 64 bytes. Application handler `0xc52c` sets analog flag 60 to `5a` and resets.
 Boot main `0x1662..0x1674` branches to USB recovery before processing pending
