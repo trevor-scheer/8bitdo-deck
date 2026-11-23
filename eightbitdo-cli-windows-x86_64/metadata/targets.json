@@ -2,12 +2,12 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "2105d1bbf5dd2431969c55ff1c772ccfcd8e162e81dcb078aa15963ab992f2a036154901ef6a4cdc98712b3b13b5a191a5b0ac81efd6a192033d5bd2bb02f204"
+   "sig": "16cbde569698149ea6c13753a3b095fef51d955aaed9b1b4366199fa29714021ee7f175e21b09988d9f018ee654e387dee570eeac5f508621442ab75e7767b09"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-22T22:10:43Z",
+  "expires": "2026-12-23T19:17:59Z",
   "spec_version": "1.0.31",
   "targets": {
    "eightbitdo-cli-windows-x86_64-0.3.0a1.tar.gz": {
@@ -71,6 +71,6 @@
     "length": 17515782
    }
   },
-  "version": 5
+  "version": 6
  }
 }

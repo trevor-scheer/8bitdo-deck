@@ -2,12 +2,12 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "f3ef50d4cc7f631f08e52edf0b87265d090611248e58ac256216066f2355316b4ce30c2c097c2a3942a6ece4a6f4a1b52f6c8379773a472332da88a513046607"
+   "sig": "3e94b40ee5616e9ce72ffb70e591d8d515724df59607c585d6d87d765fcc13759e1aadc672971f6d70d9c3db71bc78ad14f6ddbed93345accb94d19076c16b08"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-22T22:10:39Z",
+  "expires": "2026-12-23T19:17:59Z",
   "spec_version": "1.0.31",
   "targets": {
    "eightbitdo-desktop-linux-aarch64-0.3.0a1.tar.gz": {
@@ -71,6 +71,6 @@
     "length": 107891199
    }
   },
-  "version": 5
+  "version": 6
  }
 }
