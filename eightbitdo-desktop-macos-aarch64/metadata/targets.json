@@ -2,12 +2,12 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "7058640fe2b62e8b7145d4d2ef229a1479c7968233bf31278d1a026b8476a8fd353d0d5d48ffcbe0753f682a6b12b04bc3821925d3b91e0cfa626466d8bc230b"
+   "sig": "91b569cfccd225125c46e121509114d24fc96c328f623d40562954899b3ba17ceb8f02dea482c1ced8898d9da4448c06637ae86afcf2e4c0fb978b4052b9d00e"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-23T19:17:59Z",
+  "expires": "2026-12-24T18:56:27Z",
   "spec_version": "1.0.31",
   "targets": {
    "eightbitdo-desktop-macos-aarch64-0.3.0a1.tar.gz": {
@@ -71,6 +71,6 @@
     "length": 20654375
    }
   },
-  "version": 6
+  "version": 7
  }
 }

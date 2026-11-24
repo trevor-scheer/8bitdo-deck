@@ -2,12 +2,12 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "b29d187cfdb08edcb2f016c267c3748c9b176c1ad7342a223a2281b7b21658f930cd3665b46e780150226f740de23568da1981787e206fa18d6362d908dc4808"
+   "sig": "ca47450937c0dd528ad975d287b65a3fe0506bebbb4250ed86c3724ade1817184230a61980cfc4e1c171ececc1c312516a7020453b591d811ea9732bced44905"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-23T19:17:59Z",
+  "expires": "2026-12-24T18:56:27Z",
   "spec_version": "1.0.31",
   "targets": {
    "eightbitdo-cli-macos-x86_64-0.3.0a1.tar.gz": {
@@ -71,6 +71,6 @@
     "length": 15609437
    }
   },
-  "version": 6
+  "version": 7
  }
 }
