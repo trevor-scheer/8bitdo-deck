@@ -2,12 +2,12 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "6291d80e6d3d96e58851075095a5ca878b86c6ba5a54d22588a66c5f29f3d0f71b3994386a50ad2ccedbb3853082fee6a20fd55cabf16dd303134d36d4ae7f0d"
+   "sig": "43fd836fe93ec6d28951c8672f26d6cabef7ded13e8a5cc321462a7f0e10d54efc79e372686b440a20c08bc3da2045d53838cd7bf5b2a3276bb0e8d227f26908"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-25T15:28:21Z",
+  "expires": "2026-12-25T18:00:09Z",
   "spec_version": "1.0.31",
   "targets": {
    "eightbitdo-cli-linux-x86_64-0.3.0a1.tar.gz": {
@@ -91,6 +91,6 @@
     "length": 29240919
    }
   },
-  "version": 8
+  "version": 9
  }
 }

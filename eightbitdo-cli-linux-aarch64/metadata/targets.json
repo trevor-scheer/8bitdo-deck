@@ -2,12 +2,12 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "12963490563543f4141336a682ef4e7d498c715f71bdf1bbdbab1fd319217d1e410e11c8403e13b14f27a934d44f7ec66fb06d00b0778adba291b5fef3734000"
+   "sig": "3145d495ba55f6463b99fee6aab9c4f29229dd23468323a6d644b8f403d1433de0bcc6d318a434ab7746d5c06f82751c7d464315072e0ed0f0cb66588a32200e"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-25T15:28:24Z",
+  "expires": "2026-12-25T18:00:09Z",
   "spec_version": "1.0.31",
   "targets": {
    "eightbitdo-cli-linux-aarch64-0.3.0a1.tar.gz": {
@@ -91,6 +91,6 @@
     "length": 27876525
    }
   },
-  "version": 8
+  "version": 9
  }
 }
