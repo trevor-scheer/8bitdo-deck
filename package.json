@@ -1,6 +1,6 @@
 {
   "name": "8bitdo-deck",
-  "version": "0.3.0-alpha.3",
+  "version": "0.3.0-alpha.4",
   "description": "A unified 8BitDo firmware companion for Steam Deck",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
   "scripts": {
     "build": "rollup -c",
     "typecheck": "tsc --noEmit && tsc --noEmit -p desktop/tsconfig.json",
-    "test:ui": "node --test tests/ui-smoke.mjs",
+    "test:ui": "node --test tests/ui-smoke.mjs tests/firmware-selection.mjs",
     "watch": "rollup -c -w",
     "dev:desktop": "vite --config desktop/vite.config.ts",
     "build:desktop": "tsc --noEmit -p desktop/tsconfig.json && vite build --config desktop/vite.config.ts",
