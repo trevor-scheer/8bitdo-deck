@@ -81,7 +81,7 @@ class Platform:
             return False
 
     def worker_launch(self, state_dir: Path, job_id: str, action: str, *, inhibit: bool) -> WorkerLaunch:
-        if not re.fullmatch(r"[0-9a-f]{32}", job_id) or action not in {"prepare", "install", "recover"}:
+        if not re.fullmatch(r"[0-9a-f]{32}", job_id) or action not in {"prepare", "install", "recover", "batch"}:
             raise ValueError("Invalid worker request.")
         state_dir = state_dir.resolve()
         environment = external_environment()

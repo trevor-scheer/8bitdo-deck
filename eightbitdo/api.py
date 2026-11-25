@@ -64,6 +64,8 @@ _OPERATIONS = {
     "prepare_update": _Operation((("device_id", str), ("model_id", str), ("release_id", str)), frozenset({"device_id"})),
     "get_job": _Operation((("job_id", str),)),
     "install_update": _Operation((("job_id", str), ("confirmed", bool)), confirmation=True),
+    "install_updates": _Operation((("job_ids", list), ("confirmed", bool)), confirmation=True),
+    "get_update_queue": _Operation(),
     "check_recovery": _Operation((("job_id", str),)),
     "recover_update": _Operation((("job_id", str), ("confirmed", bool)), confirmation=True),
     "export_diagnostics": _Operation(),
@@ -133,7 +135,7 @@ class UpdaterAPI:
         arguments = dict(parameters)
         if operation == "prepare_update":
             arguments.setdefault("device_id", "")
-        if operation in {"install_update", "setup_recovery_access"}:
+        if operation in {"install_update", "install_updates", "setup_recovery_access"}:
             arguments.pop("confirmed")
         try:
             if operation == "info":

@@ -109,4 +109,5 @@ def public_job(job: dict) -> dict:
         "id", "state", "progress", "message", "can_install", "target_label",
         "evidence_level", "evidence",
         "can_check_recovery", "recovery_ready", "recovery_action",
+        "current_job_id",
     ) if key in job}

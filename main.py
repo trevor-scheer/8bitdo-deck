@@ -50,6 +50,12 @@ class Plugin:
     async def install_update(self, job_id: str, confirmed: bool = False):
         return await self._call("install_update", job_id=job_id, confirmed=confirmed)
 
+    async def install_updates(self, job_ids: list, confirmed: bool = False):
+        return await self._call("install_updates", job_ids=job_ids, confirmed=confirmed)
+
+    async def get_update_queue(self):
+        return await self._call("get_update_queue")
+
     async def check_recovery(self, job_id: str):
         return await self._call("check_recovery", job_id=job_id)
 

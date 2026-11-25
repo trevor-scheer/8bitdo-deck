@@ -180,7 +180,7 @@ class Service:
         self.store.path(job["id"])
         launch = self.platform.worker_launch(
             self.state_dir, job["id"], action,
-            inhibit=action == "install" or (action == "recover" and job.get("backend") in {"hid", "wireless"}),
+            inhibit=action in {"install", "batch"} or (action == "recover" and job.get("backend") in {"hid", "wireless"}),
         )
         job["worker_action"] = action
         job["worker_pid"] = None
@@ -226,6 +226,11 @@ class Service:
 
     def get_job(self, job_id: str) -> dict:
         job = self.store.read(job_id)
+        if job.get("batch_id") and job.get("worker_action") == "install" and job["state"] in ACTIVE_STATES:
+            parent = self.get_job(job["batch_id"])
+            job = self.store.read(job_id)
+            if parent["state"] in ACTIVE_STATES:
+                return public_job(job) | {"can_check_recovery": False, "recovery_ready": False}
         if job["state"] in ACTIVE_STATES and time.time() - job.get("started_at", job["created_at"]) > 10:
             pid = job.get("worker_pid")
             running = self.platform.worker_running(pid, job.get("worker_start"))
@@ -239,7 +244,36 @@ class Service:
                             self.store.save(job)
                 except RuntimeError:
                     pass
+        if job.get("backend") == "batch":
+            from .batch import stop_unfinished
+            if job["state"] not in ACTIVE_STATES | {"complete"}:
+                stop_unfinished(self, job)
+            result = public_job(job)
+            result["jobs"] = []
+            for child_id in job["job_ids"]:
+                child = self.store.read(child_id)
+                result["jobs"].append(self.get_job(child_id) if child.get("worker_action") == "recover"
+                                      else self._public_recovery_job(child))
+            if job["state"] in ACTIVE_STATES:
+                for child in result["jobs"]:
+                    child.update(can_check_recovery=False, recovery_ready=False)
+                current = next((child for child in result["jobs"] if child["id"] == job.get("current_job_id")), None)
+                if current:
+                    result["progress"] = min(99, int((job["job_ids"].index(current["id"]) * 100 + current["progress"]) / len(job["job_ids"])))
+            return result
         return self._public_recovery_job(job)
+
+    def install_updates(self, job_ids: list) -> dict:
+        from .batch import install_updates
+        return install_updates(self, job_ids)
+
+    def get_update_queue(self) -> dict | None:
+        from .batch import get_update_queue
+        return get_update_queue(self)
+
+    def run_batch(self, job: dict) -> None:
+        from .batch import run_batch
+        run_batch(self, job)
 
     def install_update(self, job_id: str) -> dict:
         self.platform.require_write_support()
@@ -247,12 +281,10 @@ class Service:
             return self._install_update(job_id)
 
     def _install_update(self, job_id: str) -> dict:
+        from .batch import require_installable
         with self.store.lock(job_id):
             job = self.store.read(job_id)
-            if job["state"] != "ready" or not job["can_install"] or job.get("backend") not in {"fwupd", "hid", "wireless"}:
-                raise ValueError("This firmware is not qualified for installation. No firmware was written.")
-            if job.get("backend") in {"hid", "wireless"} and not self.recovery_access.status()['configured']:
-                raise ValueError("Configure USB recovery access before installing firmware.")
+            require_installable(self, job)
             job.update(state="queued", can_install=False, progress=0, message="Starting the confirmed update. Keep the device connected.")
             self._spawn(job, "install")
             return public_job(job)
@@ -533,6 +565,8 @@ class Service:
     def check_recovery(self, job_id: str) -> dict:
         """Inspect an eligible failed install without changing device mode or resetting."""
         self.platform.require_write_support()
+        from .batch import require_batch_finished
+        require_batch_finished(self, self.store.read(job_id))
         with self.store.lock(job_id):
             job = self.store.read(job_id)
             if job.get("backend") == "wireless":
@@ -572,6 +606,8 @@ class Service:
     def _recover_update(self, job_id: str, confirmed: bool = False) -> dict:
         if confirmed is not True:
             raise ValueError("Review the recovery check and explicitly confirm recovery first.")
+        from .batch import require_batch_finished
+        require_batch_finished(self, self.store.read(job_id))
         with self.store.lock(job_id):
             job = self.store.read(job_id)
             _, authorization = self._recovery_context(job)

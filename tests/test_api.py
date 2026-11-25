@@ -53,6 +53,7 @@ class APITests(unittest.TestCase):
     def test_all_mutations_with_confirmation_require_exact_true(self):
         for operation, base in (
             ('install_update', {'job_id': 'fixture'}), ('recover_update', {'job_id': 'fixture'}),
+            ('install_updates', {'job_ids': ['fixture']}),
             ('setup_recovery_access', {}), ('apply_app_update', {'channel': 'stable', 'version': '1.0.0'}),
             ('recover_app_update', {}),
         ):
