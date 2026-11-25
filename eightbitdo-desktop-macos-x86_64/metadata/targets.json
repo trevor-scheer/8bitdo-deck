@@ -2,12 +2,12 @@
  "signatures": [
   {
    "keyid": "adb8cf04240424b21e8de89060ea2136a9f7823f57232ae9465c6492a1df242f",
-   "sig": "1fa729852daa57bbb8b17abed24efdda36ab76dc212fb9edc86a254954e6c61c89c9bdd068c0202462e1ceb180dd13f914349b071fc115648de976d394c4e80c"
+   "sig": "bb39098daa58b8ccb8bdef74525f53a77ac29024cc0e2db1ba6c237b6aee0f163ef5f960a2e1ee7096c1607f170d32255830eede315a745fee702a86c5f2bb0b"
   }
  ],
  "signed": {
   "_type": "targets",
-  "expires": "2026-12-24T18:56:27Z",
+  "expires": "2026-12-25T15:28:29Z",
   "spec_version": "1.0.31",
   "targets": {
    "eightbitdo-desktop-macos-x86_64-0.3.0a1.tar.gz": {
@@ -69,8 +69,28 @@
      "sha256": "985a8315daacb2a03fca1c5740491486aa16ed5760e7cbb854004db2d659dea6"
     },
     "length": 19844038
+   },
+   "eightbitdo-desktop-macos-x86_64-0.3.0a4.tar.gz": {
+    "custom": {
+     "tufup": {
+      "required": false
+     },
+     "user": {
+      "arch": "x86_64",
+      "platform": "macos",
+      "product": "desktop",
+      "release_notes": "# 0.3.0-alpha.4\n\nDecky now checks identified devices and prepares their newest stable firmware automatically. Select **Install** beside a ready device, or **Update all** at the top. The click starts installation without a separate review screen.\n\n- Compact device rows show model artwork, installed and available versions, and status. Firmware details, manual downloads, USB setup, and diagnostics are available under **Details** or **More options**.\n- Update all runs a persistent queue, one device at a time. Closing the sidebar does not stop it. A failed or unverified update stops the queue and retains the affected device's recovery controls.\n- A completed queue checks devices again. If a receiver update makes its controller eligible, installing that newly available update takes another click.\n- Latest-version selection compares firmware versions rather than relying on catalog order. Up-to-date devices skip downloads. Unsupported latest firmware remains unavailable; the plugin does not silently substitute an older image.\n\nAutomatic preparation does not write firmware. Device identity, source/destination authorization, image validation, USB access, battery checks, and suspend protection still apply. Experimental routes retain their existing validation limits; this release does not qualify additional devices or firmware versions. The desktop and CLI installation flows are unchanged.\n\nInstall the release's `8bitdo-deck.zip` through Decky to upgrade. See the [Decky setup guide](../decky-requirements.md).\n",
+      "release_tag": "v0.3.0-alpha.4",
+      "schema": 1,
+      "version": "0.3.0a4"
+     }
+    },
+    "hashes": {
+     "sha256": "3a6bb369d5ffc40ffcf4a23f4822be76a2a750629e842ee80acc4d3d16fb1dd6"
+    },
+    "length": 19853884
    }
   },
-  "version": 7
+  "version": 8
  }
 }
