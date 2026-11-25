@@ -83,6 +83,8 @@ Call `info` for the supported API/application versions, platform support, capabi
 | `prepare_update` | `model_id`, `release_id`; optional `device_id` | `{job_id}`; validates the selection and starts preparation. An omitted or empty device ID browses/downloads without identifying hardware. |
 | `get_job` | `job_id` | Public job status, evidence, installation/recovery capabilities, and progress. |
 | `install_update` | `job_id`, `confirmed` | Queues an eligible installation only when `confirmed` is exactly `true`. |
+| `install_updates` | `job_ids`, `confirmed` | Claims 1–32 unique, eligible prepared jobs and starts a durable sequential installation queue when `confirmed` is exactly `true`; returns the parent job. |
+| `get_update_queue` | None | Returns the latest installation queue and child statuses, or `null` when none exists; restores status without starting or retrying work. |
 | `check_recovery` | `job_id` | Inspects an eligible interrupted job without flashing, resetting, or entering boot mode. |
 | `recover_update` | `job_id`, `confirmed` | Queues the checked recovery action only when `confirmed` is exactly `true`. |
 | `get_recovery_access` | None | Access configuration and any pending setup status. |
@@ -96,6 +98,14 @@ Call `info` for the supported API/application versions, platform support, capabi
 An operation name cannot select a private service method or invoke a worker directly. Unknown parameters, wrong types, and unsupported API versions are rejected before the operation runs. Installation and recovery confirmations are boolean parameters, not strings or truthy integers.
 
 In the Python API and Decky adapter, `setup_recovery_access` returns immediately. Keep the same API instance alive and poll `get_recovery_access` while `pending` is true. Pending status and authorization errors belong to that instance; a separate process can inspect installed access configuration but cannot track another process's setup prompt. The CLI performs this polling before it exits.
+
+## Sequential installation queues
+
+`install_updates` accepts an array of prepared job IDs and a boolean confirmation. A one-click frontend can send `confirmed: true` when the user chooses **Install** or **Update all**; an additional review screen is not required. Automatic preparation alone does not confirm installation. The backend rejects duplicate IDs, jobs that are not eligible, and selections sharing the same physical device or receiver. All jobs are checked before the queue starts, and each install repeats the existing device/image checks before writing.
+
+The result is a parent job with `jobs`, an array of public child jobs, and an optional `current_job_id`. Poll `get_job` with the parent ID for aggregate progress and each child's status. A queue completes only after every selected update completes and verifies. The first failed or blocked child stops the queue; unstarted jobs are cancelled. Nothing is replayed automatically after failure or interruption. Check or recover an eligible attempted child using its own ID after the queue stops.
+
+`get_update_queue` reads the persisted latest queue, including terminal results. Use it after reopening the frontend or losing the response to `install_updates`; do not repeat the mutation to discover whether it started. Child recovery can remain active after the parent queue stops, so callers must inspect child states as well as the parent state before allowing new device operations. A receiver update can enable a controller update, but callers must rescan, prepare, and obtain a new installation click for that new job.
 
 ## Wireless device and job results
 

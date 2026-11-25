@@ -36,23 +36,33 @@ Wait for any firmware installation or recovery to finish before replacing the pl
 1. Download `8bitdo-deck.zip` from [GitHub Releases](https://github.com/trevor-scheer/8bitdo-deck/releases), verify it using the [download instructions](install.md#verify-the-download), and save it in the Deck's Downloads folder. Use this asset, not GitHub's **Source code** ZIP.
 2. Open **Decky → Settings → General** and enable **Developer mode** if the Developer page is hidden.
 3. Open **Developer → Install Plugin from ZIP File → Browse** and select the downloaded ZIP.
-4. Confirm installation or replacement, then open **8BitDo Deck** and select **Scan connected devices**.
+4. Confirm installation or replacement, then open **8BitDo Deck**. It scans and prepares firmware automatically; use **Check for updates** to refresh later.
 
 Developer mode exposes the ZIP installer; it is not a firmware privilege or a requirement to enable Steam/SteamOS developer debugging. The [upstream installer UI](https://github.com/SteamDeckHomebrew/decky-loader/blob/main/frontend/src/components/settings/pages/developer/index.tsx) defines these controls; wording can vary with loader version or language.
 
 Use the same ZIP installation procedure for plugin upgrades. Standalone TUF app updates do not update the Decky plugin. A normal ZIP installation does not require `sudo`, manual extraction into Decky's plugin directory, or a service restart.
 
+## Update firmware
+
+Opening the panel checks identified devices and automatically downloads and validates newer stable vendor firmware, one device at a time. Devices already on the newest listed version show **Up to date**. Unknown devices are not assigned a model automatically. For fwupd devices, preparation selects trusted metadata; fwupd downloads the image when installation starts.
+
+Choose **Install** in a ready device's row, or **Update all** to install all ready jobs sequentially. The button click confirms those exact prepared jobs. Experimental jobs remain labeled **Experimental**, and all device, source-version, image, and recovery-access checks still apply. A newer unsupported release stays unavailable; the plugin does not silently substitute an older release.
+
+The queue continues when the sidebar closes and restores its status when reopened. It stops at the first failure without retrying or recovering automatically. After a successful queue, the panel checks again. If updating a receiver makes its controller eligible, that controller needs a new **Install** or **Update all** click.
+
+Device rows show a small picture, component name, installed and available versions, and status. **Details** explains unavailable updates. **More options** exposes firmware details for ready updates, manual firmware downloads, USB setup, the official updater, diagnostics, and scan warnings.
+
 ## USB permissions
 
 The plugin recognizes the reviewed, root-owned SteamOS `70-steam-jupiter-input.rules` policy and checks actual HID access when opening a device. On the tested SteamOS configuration, no additional rule or administrator prompt was needed.
 
-On a modified SteamOS installation or another Linux distribution, check the plugin's recovery-access status. If it offers setup, select **Set up USB recovery** and approve the system administrator prompt. That fallback requires `pkexec`, Bash, and a working desktop authentication agent. It installs narrowly scoped rules for recovery interfaces `2dc8:3208` and `2dc8:3002`. It does not grant access to every HID device or make the plugin run as root. It also does not fix missing access to a device's normal-mode HID interface.
+On a modified SteamOS installation or another Linux distribution, open **More options** and check the recovery-access status. If it offers setup, select **Set up USB recovery** and approve the system administrator prompt. That fallback requires `pkexec`, Bash, and a working desktop authentication agent. It installs narrowly scoped rules for recovery interfaces `2dc8:3208` and `2dc8:3002`. It does not grant access to every HID device or make the plugin run as root. It also does not fix missing access to a device's normal-mode HID interface.
 
 If Gaming Mode cannot display the authorization prompt, use the [Desktop Mode fallback procedure](install.md#receiver-recovery-access). Administrator authorization is conditional on needing that permission setup; it is not a requirement for every Steam Deck owner.
 
 ## Optional tools and device requirements
 
-- **fwupd:** only needed for the separate, supported legacy fwupd route. Its absence can produce a scan warning without blocking the native Ultimate receiver/controller paths.
+- **fwupd:** only needed for the separate, supported legacy fwupd route. Its absence can produce a warning under **More options** without blocking the native Ultimate receiver/controller paths.
 - **Chrome or another WebHID-capable browser:** only needed to use **Open official updater**. Native updates do not use a browser or WebHID.
 - **Node.js, pnpm, and development dependencies:** only needed to [build the plugin from source](install.md#build-the-plugin-from-source). Rust/Tauri build tools are for the standalone desktop app, not release-ZIP installation.
 - **A USB data connection:** receivers connect directly or through a USB-connected dock. The experimental Ultimate 2 wireless controller route uses 2.4 GHz through a receiver running 1.06, requires at least 30% controller battery, and permits only the reviewed 1.09 → 1.10 image. Bluetooth updating is not enabled. See the [firmware procedures](install.md#prepare-and-install-firmware) for exact device/version eligibility and recovery instructions.
@@ -71,4 +81,4 @@ Meeting Decky's requirements does not authorize every cataloged firmware image. 
 | USB access denied or recovery access unavailable | Reconnect the device and check recovery-access status. Follow the scoped permission setup only if needed; do not add Decky's root flag or broadly change `/dev/hidraw*` permissions. |
 | Firmware download fails | Check network access, the system clock, and trusted CA certificates. Do not disable HTTPS certificate verification. |
 
-After resolving a prerequisite failure, scan and prepare the update again. Installation requires a fresh eligible job and explicit confirmation. Keep USB/power stable and do not restart Decky or SteamOS during a firmware operation.
+After resolving a prerequisite failure, select **Check for updates** to scan and prepare again. **Install** confirms one eligible job; **Update all** confirms the ready jobs shown at that moment. Neither action opens a separate review screen. Keep USB/power stable and do not restart Decky or SteamOS during a firmware operation.

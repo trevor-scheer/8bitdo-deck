@@ -26,6 +26,7 @@ DECKY_API_MATERIALS = (
     "docs/rebuild-library.md", "src/index.tsx", "src/api.ts", "rollup.config.js",
     "src/shared/DevicePicture.tsx", "src/shared/device-artwork.ts", "src/shared/preparation.ts",
     "src/shared/theme.ts", "src/shared/types.ts",
+    "src/decky/firmware.ts", "src/decky/useDeviceUpdates.ts",
     "tsconfig.json", "pnpm-lock.yaml", "scripts/package.py",
 )
 

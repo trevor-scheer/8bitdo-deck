@@ -26,6 +26,8 @@ The desktop React app is built with Vite. Its Rust shell accepts only allowliste
 
 Decky keeps its existing adapter and controller-focus controls. The desktop and Decky share types, visual tokens, and artwork in `src/shared/`. The original SVG illustrations depict specific models; colors are illustrative and never identify hardware. Firmware support decisions remain in the backend.
 
+Decky automatically prepares newer stable firmware for identified devices, then uses a single **Install** or **Update all** click to confirm the exact ready jobs. The desktop retains its prepare/review/confirm flow. Decky caches preparation IDs against device identity, installed version, and selected release, and serializes preparation to avoid probing shared receiver interfaces concurrently.
+
 The packaged desktop's `--smoke-test` mode creates no webview. It calls only sidecar `info`, checks the API/application versions, and exits. It cannot mount the React app or trigger its initial device scan.
 
 ## Platform boundary
@@ -45,6 +47,8 @@ Frontends submit background work and poll durable jobs. Linux retains `~/.local/
 Preparation does not flash. Eligible Linux installation and recovery workers run through the systemd user manager with suspend inhibition. The backend refuses to write without that protection. A worker retains target/source context, revalidates the cached image and authorization, and checks the returning device version before reporting completion.
 
 Source and installed-Python workers use the calling interpreter. A frozen executable reexecutes its own private worker mode with `PYINSTALLER_RESET_ENVIRONMENT=1` and an independent extraction lifetime. Decky's frozen host is detected separately and launches the packaged backend using host Python. Preparation workers detach with a new POSIX session or Windows detached-process flags. Closing a frontend does not intentionally cancel submitted workers; interruption does not trigger automatic firmware retries.
+
+`install_updates` persists a parent queue and claims its selected child jobs before dispatching a detached, suspend-inhibited worker. The worker installs children sequentially, preserving each child's target checks and recovery context. It stops on the first failure or blocked result and cancels unstarted children. Queue restoration uses `get_update_queue` and `get_job`; it does not depend on the sidebar staying open or on replaying mutation calls. Recovery remains an explicit operation on the attempted child job.
 
 Keep application files, USB, and power intact while firmware jobs run. Application self-updates use an interprocess exclusion lock and reject queued or active firmware work. A pending app replacement blocks new firmware jobs until it completes or is recovered.
 

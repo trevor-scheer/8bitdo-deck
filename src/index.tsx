@@ -1,49 +1,15 @@
 import { definePlugin } from "@decky/api";
 import { ButtonItem, DropdownItem, PanelSection, PanelSectionRow, staticClasses } from "@decky/ui";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  Device, Job, Model, RecoveryAccess, Release, checkRecovery, exportDiagnostics, getJob, getModels, getReleases,
-  getRecoveryAccess, installUpdate, openOfficialUpdater, prepareUpdate, recoverUpdate, scanDevices, setupRecoveryAccess,
+  Job, Model, RecoveryAccess, Release, checkRecovery, exportDiagnostics, getReleases,
+  getRecoveryAccess, openOfficialUpdater, prepareUpdate, recoverUpdate, setupRecoveryAccess,
 } from "./api";
-
-import { preparationAdvice } from "./shared/preparation";
 import { DevicePicture } from "./shared/DevicePicture";
 import { theme, progressValue } from "./shared/theme";
+import { activeJob, messageOf as errorMessage, useDeviceUpdates } from "./decky/useDeviceUpdates";
 
-const LAST_JOB = "8bitdo-deck:last-job";
-const textStyle = { color: theme.text, fontSize: 13, lineHeight: 1.5, overflowWrap: "anywhere" as const, margin: "8px 0" };
-
-interface Selection {
-  deviceId: string;
-  modelId: string;
-  identity: string;
-  browsing: boolean;
-}
-
-const emptySelection: Selection = { deviceId: "", modelId: "", identity: "", browsing: false };
-
-function deviceIdentity(device: Device): string {
-  return JSON.stringify([device.id, device.vid, device.pid, device.role, device.model_id]);
-}
-
-function selectionForDevice(device: Device): Selection {
-  return { deviceId: device.id, modelId: device.model_id ?? "", identity: deviceIdentity(device), browsing: false };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function savedJob(): string {
-  try { return localStorage.getItem(LAST_JOB) ?? ""; } catch { return ""; }
-}
-
-function saveJob(id: string) {
-  try {
-    if (id) localStorage.setItem(LAST_JOB, id);
-    else localStorage.removeItem(LAST_JOB);
-  } catch { /* The current job remains usable when browser storage is unavailable. */ }
-}
+const textStyle = { color: theme.text, fontSize: 13, lineHeight: 1.4, overflowWrap: "anywhere" as const, margin: "6px 0" };
 
 function RecoveryAccessSettings({ disabled }: { disabled: boolean }) {
   const alive = useRef(true);
@@ -104,294 +70,158 @@ function RecoveryAccessSettings({ disabled }: { disabled: boolean }) {
   </>;
 }
 
-function Content() {
-  const alive = useRef(true);
-  const selectionRef = useRef<Selection>(emptySelection);
-  const selectionRevision = useRef(0);
-  const scanRevision = useRef(0);
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [warnings, setWarnings] = useState<string[]>([]);
-  const [models, setModels] = useState<Model[]>([]);
+function ManualFirmware({ models, disabled, onJob }: { models: Model[]; disabled: boolean; onJob: (jobId: string) => void }) {
   const [modelId, setModelId] = useState("");
-  const [deviceId, setDeviceId] = useState("");
   const [releases, setReleases] = useState<Release[]>([]);
   const [releaseId, setReleaseId] = useState("");
-  const [jobId, setJobId] = useState(savedJob);
-  const [job, setJob] = useState<Job | null>(null);
-  const [scanning, setScanning] = useState(false);
-  const [loadingReleases, setLoadingReleases] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [confirmInstall, setConfirmInstall] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-
   const model = models.find((item) => item.id === modelId);
-  const device = devices.find((item) => item.id === deviceId);
-  const preparation = preparationAdvice(model, device);
   const release = releases.find((item) => item.id === releaseId);
-  const jobActive = !!job && ["queued", "downloading", "validating", "installing", "verifying"].includes(job.state);
-
-  const applySelection = useCallback((selection: Selection) => {
-    if (selection.modelId !== selectionRef.current.modelId) {
-      setReleases([]);
-      setReleaseId("");
-    }
-    selectionRef.current = selection;
-    setDeviceId(selection.deviceId);
-    setModelId(selection.modelId);
-    setConfirmInstall(false);
-  }, []);
-
-  const scan = useCallback(async () => {
-    const requestRevision = ++scanRevision.current;
-    const previousSelectionRevision = selectionRevision.current;
-    setScanning(true);
-    setError("");
-    try {
-      const [result, availableModels] = await Promise.all([scanDevices(), getModels()]);
-      if (!alive.current || requestRevision !== scanRevision.current) return;
-      setDevices(result.devices);
-      setWarnings(result.warnings);
-      setModels(availableModels);
-      const authoritative = (item: Device) => ["identified", "supported"].includes(item.status)
-        && availableModels.some((candidate) => candidate.id === item.model_id);
-      const current = selectionRef.current;
-      const selectionChanged = previousSelectionRevision !== selectionRevision.current;
-      if (current.deviceId) {
-        const connected = result.devices.find((item) => item.id === current.deviceId);
-        if (connected && authoritative(connected) && (!selectionChanged || deviceIdentity(connected) === current.identity)) {
-          applySelection(selectionForDevice(connected));
-        } else if (!connected || !selectionChanged || deviceIdentity(connected) !== current.identity) {
-          applySelection(emptySelection);
-        }
-      } else if (!current.browsing && !selectionChanged) {
-        const detected = result.devices.find(authoritative);
-        applySelection(detected ? selectionForDevice(detected) : emptySelection);
-      }
-    } catch (reason) {
-      if (alive.current && requestRevision === scanRevision.current) setError(`Could not scan devices: ${errorMessage(reason)}`);
-    } finally {
-      if (alive.current && requestRevision === scanRevision.current) setScanning(false);
-    }
-  }, [applySelection]);
-
-  useEffect(() => {
-    alive.current = true;
-    void scan();
-    return () => { alive.current = false; scanRevision.current++; };
-  }, [scan]);
-
   useEffect(() => {
     let cancelled = false;
     setReleases([]);
     setReleaseId("");
-    setConfirmInstall(false);
-    if (!modelId) {
-      setLoadingReleases(false);
-      return () => { cancelled = true; };
-    }
-    setLoadingReleases(true);
+    if (!modelId) return;
+    setLoading(true);
+    setError("");
     void getReleases(modelId).then((result) => {
       if (cancelled) return;
       if (result.error) throw new Error(result.error);
       setReleases(result.releases);
       setReleaseId(result.releases[0]?.id ?? "");
-    }).catch((reason: unknown) => {
-      if (!cancelled) setError(`Could not load firmware: ${errorMessage(reason)}`);
-    }).finally(() => {
-      if (!cancelled) setLoadingReleases(false);
-    });
+    }).catch((reason) => { if (!cancelled) setError(errorMessage(reason)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [modelId]);
+  return <>
+    <DropdownItem label="Browse firmware" strDefaultLabel="Select a model" selectedOption={modelId}
+      disabled={disabled || loading} rgOptions={models.map((item) => ({ data: item.id, label: `${item.name} (${item.role})` }))}
+      onChange={(option) => setModelId(option.data)} />
+    {model && <>
+      <p style={textStyle}>{model.instructions}</p>
+      <p style={textStyle}>Manual downloads do not install firmware or identify connected hardware.</p>
+      {!!releases.length && <DropdownItem label="Firmware release" selectedOption={releaseId}
+        disabled={disabled || loading} rgOptions={releases.map((item) => ({ data: item.id, label: item.version }))}
+        onChange={(option) => setReleaseId(option.data)} />}
+      {release?.notes && <p style={{ ...textStyle, whiteSpace: "pre-wrap" }}>{release.notes}</p>}
+      <ButtonItem layout="below" disabled={disabled || loading || !release?.downloadable} onClick={() => {
+        setLoading(true);
+        setError("");
+        void prepareUpdate("", modelId, releaseId).then((result) => {
+          if (result.error || !result.job_id) throw new Error(result.error ?? "Could not download firmware.");
+          onJob(result.job_id);
+        }).catch((reason) => setError(errorMessage(reason))).finally(() => setLoading(false));
+      }}>Download firmware only</ButtonItem>
+    </>}
+    {error && <p role="alert" style={textStyle}>{error}</p>}
+  </>;
+}
 
-  useEffect(() => {
-    if (!jobId || busy) return;
-    let cancelled = false;
-    let timeout: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        const result = await getJob(jobId);
-        if (cancelled) return;
-        setJob(result);
-        if (!["complete", "completed", "failed", "cancelled", "ready", "blocked"].includes(result.state)) {
-          timeout = setTimeout(() => { void poll(); }, 1000);
-        }
-      } catch (reason) {
-        if (!cancelled) {
-          const message = `Could not read update progress: ${errorMessage(reason)}`;
-          setError(message);
-          setJob({ id: jobId, state: "failed", progress: 0, can_install: false, message });
-        }
-      }
-    };
-    void poll();
-    return () => { cancelled = true; clearTimeout(timeout); };
-  }, [jobId, busy]);
-
+function Content() {
+  const updates = useDeviceUpdates();
+  const [details, setDetails] = useState<string[]>([]);
+  const [advanced, setAdvanced] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const disabled = updates.disabled || busy;
+  const progress = updates.progress;
+  const children = progress?.jobs ?? (progress ? [progress] : []);
   const act = async (action: () => Promise<void>) => {
+    if (disabled) return;
     setBusy(true);
     setError("");
-    setNotice("");
     try { await action(); }
-    catch (reason) { if (alive.current) setError(errorMessage(reason)); }
-    finally { if (alive.current) setBusy(false); }
+    catch (reason) { setError(errorMessage(reason)); }
+    finally { setBusy(false); }
   };
-
-  const selectDevice = (selected: Device) => {
-    selectionRevision.current++;
-    applySelection(selectionForDevice(selected));
-    setError("");
+  const toggleDetails = (id: string) => setDetails((old) => old.includes(id) ? old.filter((key) => key !== id) : [...old, id]);
+  const recover = async (job: Job, check: boolean) => {
+    const result = check ? await checkRecovery(job.id) : await recoverUpdate(job.id, true);
+    updates.watch(progress?.jobs ? { ...progress, jobs: progress.jobs.map((item) => item.id === job.id ? result : item) } : result);
   };
 
   return <>
-    <div style={{ margin: "8px 16px 18px", padding: 16, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: theme.radius }}>
-      <div style={{ color: theme.accent, fontSize: 10, fontWeight: 700, letterSpacing: 1.5 }}>8BITDO UPDATER</div>
-      <p style={{ ...textStyle, marginBottom: 0 }}>Controller and receiver firmware.<br />One place to check updates.</p>
-    </div>
-    <PanelSection title="Devices">
+    <PanelSection title="Firmware updates">
       <PanelSectionRow>
-        <ButtonItem layout="below" disabled={scanning || busy || jobActive} onClick={() => void scan()}>
-          {scanning ? "Scanning…" : "Scan connected devices"}
+        <ButtonItem layout="below" disabled={disabled || !updates.ready.length}
+          description={updates.checking ? "Checking devices and downloading firmware…" : "Installs ready updates one at a time. Keep USB connected."}
+          onClick={() => void updates.install(updates.ready)}>
+          {`Update all${updates.ready.length ? ` (${updates.ready.length})` : ""}`}
         </ButtonItem>
       </PanelSectionRow>
-      {!scanning && !devices.length && <p style={textStyle}>Connect your controller or receiver by USB, then scan. You can also browse firmware by model below.</p>}
-      {devices.map((item) => <PanelSectionRow key={item.id}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", margin: "8px 0 2px", background: theme.surface, border: `1px solid ${item.id === deviceId ? theme.accent : theme.border}`, borderRadius: theme.radius }}>
-          <DevicePicture modelId={item.model_id} name={item.name} size={88} />
-          <div>
-            <span style={{ color: theme.accent, fontSize: 11, textTransform: "capitalize" }}>{item.role}</span>
-            <p style={{ ...textStyle, margin: "4px 0", fontSize: 12 }}>{item.firmware_version ? `Firmware ${item.firmware_version}` : "Version unknown"}</p>
-          </div>
-        </div>
-        <ButtonItem
-          layout="below"
-          disabled={busy || jobActive}
-          description={`${item.role} · ${item.firmware_version ? `Firmware ${item.firmware_version}` : "Firmware version unknown"}${item.id === deviceId ? " · Selected" : ""}`}
-          onClick={() => selectDevice(item)}
-        >{item.name}</ButtonItem>
-      </PanelSectionRow>)}
-      {device && <p style={textStyle}>{device.reason || device.status}</p>}
-      {warnings.map((warning, index) => <p key={index} style={textStyle}>{warning}</p>)}
-    </PanelSection>
-
-    <PanelSection title="Firmware">
-      <PanelSectionRow>
-        <DropdownItem
-          label="Model and component"
-          strDefaultLabel="Select a model"
-          description="Controller and receiver firmware are separate."
-          rgOptions={models.map((item) => ({ data: item.id, label: `${item.name} (${item.role})` }))}
-          selectedOption={modelId}
-          disabled={busy || jobActive || !models.length}
-          onChange={(option) => {
-            selectionRevision.current++;
-            applySelection(device && device.model_id === option.data
-              ? selectionForDevice(device)
-              : { deviceId: "", modelId: option.data, identity: "", browsing: true });
-            setError("");
-          }}
-        />
-      </PanelSectionRow>
-      {model && <>
-        <div style={{ textAlign: "center", background: theme.surface, borderRadius: theme.radius, padding: 8 }}>
-          <DevicePicture modelId={model.id} name={model.name} size={150} />
-        </div>
-        <p style={textStyle}>{model.instructions}</p>
-        <p style={textStyle}>{model.support}</p>
-        <p style={textStyle}>{preparation.description}</p>
-        {!device && <p style={textStyle}>Browsing firmware only. Selecting a model does not confirm that it matches connected hardware.</p>}
-        {loadingReleases && <p style={textStyle}>Checking official firmware releases…</p>}
-        {!loadingReleases && releases.length === 0 && <p style={textStyle}>No firmware releases are available from this source.</p>}
-        {releases.length > 0 && <PanelSectionRow>
-          <DropdownItem
-            label="Firmware release"
-            rgOptions={releases.map((item) => ({ data: item.id, label: `${item.version}${item.date ? ` · ${item.date}` : ""}` }))}
-            selectedOption={releaseId}
-            disabled={busy || jobActive || loadingReleases}
-            onChange={(option) => { setReleaseId(option.data); setConfirmInstall(false); }}
-          />
-        </PanelSectionRow>}
-        {release?.notes && <p style={{ ...textStyle, whiteSpace: "pre-wrap" }}>{release.notes}</p>}
-        <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            disabled={busy || jobActive || loadingReleases || !release?.downloadable}
-            onClick={() => void act(async () => {
-              const targetId = device?.model_id === modelId && ["identified", "supported"].includes(device.status) ? device.id : "";
-              const result = await prepareUpdate(targetId, modelId, releaseId);
-              if (result.error || !result.job_id) throw new Error(result.error ?? "The download could not be started.");
-              if (!alive.current) return;
-              setJob(null);
-              setJobId(result.job_id);
-              saveJob(result.job_id);
-              setConfirmInstall(false);
-            })}
-          >{preparation.label}</ButtonItem>
-        </PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void updates.refresh(true)}>
+        {updates.checking ? "Checking…" : "Check for updates"}
+      </ButtonItem></PanelSectionRow>
+      {updates.error && <p role="alert" style={textStyle}>{updates.error}</p>}
+      {updates.progressError && <p role="alert" style={textStyle}>{updates.progressError}</p>}
+      {progress && <>
+        <p role="status" style={textStyle}>{progress.message}</p>
+        <progress aria-label="Update progress" value={progressValue(progress.progress)} max={100} style={{ width: "100%", accentColor: theme.accent }} />
+        {children.map((job) => <div key={job.id}>
+          {progress.jobs && <p style={textStyle}>{job.target_label}: {job.state}</p>}
+          {["failed", "blocked"].includes(job.state) && <p style={textStyle}>{job.message}</p>}
+          {["failed", "blocked"].includes(job.state) && job.can_check_recovery && !job.recovery_ready && <ButtonItem
+            layout="below" disabled={disabled} description="Checks the interrupted update without writing firmware."
+            onClick={() => void act(() => recover(job, true))}>Check interrupted update</ButtonItem>}
+          {job.recovery_ready && <ButtonItem layout="below" disabled={disabled}
+            description={job.recovery_action === "reflash" ? "Erases firmware and reinstalls this update’s cached image. Keep USB connected." : "Finishes the interrupted update. Keep USB connected."}
+            onClick={() => void act(() => recover(job, false))}>
+            {job.recovery_action === "reflash" ? "Erase and reinstall" : "Recover device"}
+          </ButtonItem>}
+        </div>)}
+        {!activeJob(progress) && <ButtonItem layout="below" disabled={disabled} onClick={updates.dismiss}>Dismiss status</ButtonItem>}
       </>}
     </PanelSection>
 
-    {job && <PanelSection title="Update progress">
-      {job.target_label && <p style={{ ...textStyle, fontWeight: "bold" }}>{job.target_label}</p>}
-      <p style={textStyle}>{job.message}</p>
-      <progress aria-label="Update progress" value={progressValue(job.progress)} max={100} style={{ width: "100%", accentColor: theme.accent }} />
-      {job.evidence_level === "source-reviewed-experimental" && <p style={textStyle}>Experimental update: the protocol has been reviewed, but a complete update has not yet been validated on hardware.</p>}
-      {job.can_install && !confirmInstall && <PanelSectionRow>
-        <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => setConfirmInstall(true)}>Review installation</ButtonItem>
-      </PanelSectionRow>}
-      {job.can_install && confirmInstall && <>
-        <p style={textStyle}>Install {job.target_label || "the prepared firmware on the verified device"}? Keep USB connected and keep the Deck awake until verification finishes.</p>
-        {job.evidence?.trim() && <p style={{ ...textStyle, whiteSpace: "pre-wrap" }}>{job.evidence}</p>}
-        <PanelSectionRow>
-          <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {
-            setConfirmInstall(false);
-            const result = await installUpdate(job.id, true);
-            if (alive.current) setJob(result);
-          })}>Confirm firmware installation</ButtonItem>
-        </PanelSectionRow>
-        <PanelSectionRow><ButtonItem disabled={busy} layout="below" onClick={() => setConfirmInstall(false)}>Go back</ButtonItem></PanelSectionRow>
-      </>}
-      {["failed", "blocked"].includes(job.state) && job.can_check_recovery && !job.recovery_ready && <PanelSectionRow>
-        <ButtonItem disabled={busy || jobActive} layout="below" description="Checks this interrupted update without writing firmware." onClick={() => void act(async () => {
-          const result = await checkRecovery(job.id);
-          if (alive.current) setJob(result);
-        })}>Check interrupted update</ButtonItem>
-      </PanelSectionRow>}
-      {job.recovery_ready && <>
-        <p style={textStyle}>{job.recovery_action === "reflash"
-          ? "Recovery will erase the device firmware and reinstall the exact cached image for this interrupted update. Keep USB connected and keep the Deck awake."
-          : "The device state has been checked. Recovery may finish an already committed update. Keep USB connected."}</p>
-        <PanelSectionRow>
-          <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {
-            const result = await recoverUpdate(job.id, true);
-            if (alive.current) setJob(result);
-          })}>{job.recovery_action === "reflash" ? "Confirm erase and reinstall" : "Confirm device recovery"}</ButtonItem>
-        </PanelSectionRow>
-      </>}
-      {!jobActive && <PanelSectionRow>
-        <ButtonItem disabled={busy} layout="below" onClick={() => {
-          setJob(null); setJobId(""); saveJob(""); setConfirmInstall(false);
-        }}>Dismiss status</ButtonItem>
-      </PanelSectionRow>}
-    </PanelSection>}
+    <PanelSection title={`Devices${updates.rows.length ? ` (${updates.rows.length})` : ""}`}>
+      {!updates.checking && !updates.rows.length && <p style={textStyle}>Connect a controller or receiver by USB. For wireless updates, turn on the controller in 2.4 GHz mode.</p>}
+      {updates.rows.map((row) => {
+        const { device, release, job } = row;
+        const ready = job?.state === "ready" && job.can_install;
+        const experimental = job?.evidence_level === "source-reviewed-experimental";
+        const version = device.firmware_version ?? "Version unknown";
+        const available = release && !["Up to date", "Newer firmware installed"].includes(row.status) ? ` → ${release.version}` : "";
+        return <PanelSectionRow key={device.id}>
+          <ButtonItem layout="inline" bottomSeparator="standard" disabled={ready ? disabled : false}
+            icon={<DevicePicture modelId={device.model_id} name={device.name} size={40} />}
+            label={<span style={{ fontSize: 12, overflowWrap: "anywhere" }}>{device.name}</span>}
+            description={<span style={{ fontSize: 11 }}>{version}{available} · {row.status}{experimental ? " · Experimental" : ""}</span>}
+            onClick={() => ready ? void updates.install([row]) : toggleDetails(device.id)}>
+            {ready ? "Install" : details.includes(device.id) ? "Hide" : "Details"}
+          </ButtonItem>
+          {ready && advanced && <ButtonItem layout="below" onClick={() => toggleDetails(device.id)}>Firmware details</ButtonItem>}
+          {details.includes(device.id) && <div style={{ padding: "0 8px 8px" }}>
+            <p style={textStyle}>{row.error || job?.message || device.reason}</p>
+            {experimental && <p style={textStyle}>Experimental: protocol reviewed; a complete flash has not yet been validated on hardware.</p>}
+            {device.backend === "wireless" && <p style={textStyle}>Uses 2.4 GHz through the USB receiver. Charge the controller to at least 30%.</p>}
+            {release?.notes && <p style={{ ...textStyle, whiteSpace: "pre-wrap" }}>{release.notes}</p>}
+            {job?.evidence && <p style={textStyle}>{job.evidence}</p>}
+          </div>}
+        </PanelSectionRow>;
+      })}
+    </PanelSection>
 
-    <PanelSection title="Other update options">
-      <RecoveryAccessSettings disabled={busy || jobActive} />
-      <p style={textStyle}>8BitDo’s web updater supports some models, but currently has no update path for the Ultimate Bluetooth receiver. USB access may need setup in Desktop Mode.</p>
-      <PanelSectionRow>
-        <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {
+    <PanelSection>
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => setAdvanced(!advanced)}>
+        {advanced ? "Hide options" : "More options"}
+      </ButtonItem></PanelSectionRow>
+      {advanced && <>
+        <RecoveryAccessSettings disabled={disabled} />
+        <ManualFirmware models={updates.models} disabled={disabled} onJob={(id) => updates.watch({ id, state: "queued", progress: 0, can_install: false, message: "Downloading firmware…" })} />
+        <ButtonItem disabled={disabled} layout="below" onClick={() => void act(async () => {
           const result = await openOfficialUpdater();
           if (!result.opened) throw new Error(result.error ?? "Could not open the official updater.");
-          if (alive.current) setNotice("Opened the official updater in your browser.");
+          setNotice("Opened the official updater in your browser.");
         })}>Open official updater</ButtonItem>
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <ButtonItem disabled={busy || jobActive} layout="below" onClick={() => void act(async () => {
+        <ButtonItem disabled={disabled} layout="below" onClick={() => void act(async () => {
           const result = await exportDiagnostics();
           if (result.error || !result.path) throw new Error(result.error ?? "Could not export diagnostics.");
-          if (alive.current) setNotice(`Diagnostics saved to ${result.path}`);
+          setNotice(`Diagnostics saved to ${result.path}`);
         })}>Export diagnostics</ButtonItem>
-      </PanelSectionRow>
+        {updates.warnings.map((warning, index) => <p key={index} style={textStyle}>{warning}</p>)}
+      </>}
       {notice && <p role="status" style={textStyle}>{notice}</p>}
       {error && <p role="alert" style={textStyle}>{error}</p>}
     </PanelSection>

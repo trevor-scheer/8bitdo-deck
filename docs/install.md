@@ -120,7 +120,7 @@ Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader#install
 2. In Gaming Mode, open Decky from the Quick Access menu, then open Decky's settings.
 3. In **Settings → General**, enable **Developer mode** if the **Developer** page is hidden.
 4. Open **Developer → Install Plugin from ZIP File → Browse** and select `8bitdo-deck.zip`. Confirm installation or replacement after checking the package source.
-5. Open **8BitDo Deck** from the plugin list and choose **Scan connected devices**.
+5. Open **8BitDo Deck** from the plugin list. It checks connected devices and prepares firmware automatically; select **Check for updates** to refresh later.
 
 The [Decky developer settings implementation](https://github.com/SteamDeckHomebrew/decky-loader/blob/main/frontend/src/components/settings/pages/developer/index.tsx) supports installing a local ZIP. Labels can vary by Decky version and language.
 
@@ -130,7 +130,7 @@ The plugin runs as the desktop user and does not request Decky's root flag. It d
 
 On normal SteamOS, no terminal command or administrator setup is needed. The plugin recognizes the existing trusted SteamOS policy and checks actual device access. On the tested SteamOS 3.9.5 system, the root-owned `70-steam-jupiter-input.rules` already grants HID access to the active local user. Opening and closing the receiver's recovery interface as the desktop user succeeded without installing rules. The plugin still runs without Decky's root flag.
 
-If another Linux system lacks suitable recovery access, select **Set up USB recovery** and approve its normal administrator prompt. If Gaming Mode cannot show the prompt, run the packaged fallback installer in Desktop Mode:
+If another Linux system lacks suitable recovery access, open **More options**, select **Set up USB recovery**, and approve its normal administrator prompt. If Gaming Mode cannot show the prompt, run the packaged fallback installer in Desktop Mode:
 
 ```sh
 bash ~/homebrew/plugins/8bitdo-deck/scripts/install-udev-rules.sh
@@ -151,9 +151,19 @@ The first command only checks access configuration. The second requests administ
 
 ## Prepare and install firmware
 
-The desktop app and plugin automatically select the first identified component and load its matching firmware releases. If multiple components are connected, you can select another one from the device list. Controller and receiver firmware are separate. Manual model browsing remains available, but choosing a model manually does not prove that it matches attached hardware.
+### Decky: one-click installation
 
-**Prepare firmware** does not write to a device. For vendor firmware it downloads and validates the image. For fwupd it prepares a trusted release plan; fwupd downloads and validates the firmware when installation begins.
+Open **8BitDo Deck** with your controllers or receivers connected. The plugin identifies each component, chooses its newest stable release by version, and prepares newer firmware automatically, one device at a time. Vendor images are downloaded and checked for matching headers, versions, and installation eligibility. For fwupd devices, preparation selects a trusted release plan; fwupd downloads and validates the firmware when installation begins. Preparation does not write firmware.
+
+Each compact device row shows its picture, name, installed and available versions, and status. Choose **Install** on a ready device to start its update immediately, or **Update all** to queue every ready job shown at that moment. These clicks confirm installation; there is no separate review screen. Experimental jobs are labeled **Experimental**. Native jobs still require the exact reviewed image, matching source/device authorization, and verified recovery access.
+
+The queue installs one device at a time and stops at the first failed or blocked result. It does not retry or recover automatically. Jobs continue when the sidebar closes, and reopening restores queue status. After all selected updates succeed, the panel checks again. A controller that becomes eligible after its receiver updates requires another click; it is not silently added to the previous queue.
+
+Devices already on the newest listed version show **Up to date** and skip downloading. A newer unqualified image stays unavailable; the plugin does not fall back to an older reviewed image. **Details** explains unavailable updates. Use **More options** for firmware details on ready jobs, manual **Download firmware only**, recovery-access setup, the official updater, diagnostics, and warnings. Manual browsing does not identify attached hardware or authorize a write. **Check for updates** performs a fresh scan and preparation after a connection or permission change.
+
+### Desktop and CLI preparation
+
+The desktop app selects the first identified component and loads its matching releases. Select another component from the device list when needed; controller and receiver firmware are separate. Choose **Prepare firmware** to download and validate the selected release. Eligible jobs offer **Review installation**, followed by **Confirm firmware installation**. A source-reviewed experimental update has not been hardware-qualified.
 
 The equivalent standalone workflow is:
 
@@ -166,9 +176,7 @@ eightbitdo job JOB_ID
 
 Use identifiers returned by the preceding commands. Preparation runs in the background, so poll `job` until it leaves an active state. Review its target, version, evidence, and `can_install` result. To start an eligible update after that review, run `eightbitdo install JOB_ID --confirm`, then poll `job` through reconnect verification. Omitting `--device-id` prepares a download without an identified hardware target and cannot authorize installation.
 
-The plugin offers **Review installation** only when the backend authorizes the prepared update. Native jobs require a matching developer-issued authorization and verified recovery access. Review the target, version, and evidence level, then select **Confirm firmware installation**. A source-reviewed experimental update has not been hardware-qualified. Keep the USB connection and power stable until the plugin reports verification complete.
-
-Background jobs continue when the sidebar closes; reopening the plugin restores their status. Update workers run in transient user services outside Decky’s service. A benign live check verified worker launch and suspend inhibition without accessing hardware. Do not restart Decky or SteamOS during installation; surviving a Decky restart has not been validated. After a worker interruption, the app requires checking the device rather than retrying automatically.
+Keep USB and power stable until returning-device verification completes. Update workers run in transient user services outside Decky’s service. A benign live check verified worker launch and suspend inhibition without accessing hardware. Do not restart Decky or SteamOS during installation; surviving a Decky restart has not been validated. After a worker interruption, the app requires checking the device rather than retrying automatically.
 
 The fwupd route preserves the system service's authorization and configured reporting policies. A device whose identity changes after leaving the bootloader may need a manual rescan; the app does not declare success solely because the install command exited successfully.
 
@@ -185,21 +193,24 @@ Choose the matching receiver and destination:
 
 The original receiver's installed bootloader bytes have not been fingerprinted. Its boot round trip and one existing application-page CRC passed. Both paths remain experimental: first installation, recovery reinstall, pending-image copy, and power-loss recovery have not been hardware-validated.
 
-1. Keep the receiver connected to the Deck by USB, scan devices, and select its receiver entry.
-2. Select its authorized destination above and choose **Prepare firmware**. Preparation validates the image and applicable source checks. A mismatch keeps installation blocked; legacy boot geometry is checked after confirmed entry and before erase.
-3. Choose **Review installation** and read the experimental evidence, target, and version details.
-4. To start the update, select **Confirm firmware installation**. Keep USB and power connected until the plugin verifies the returning receiver's version. Check normal controller/receiver operation afterward.
+For Decky:
 
-Preparation does not start the update. The user's final confirmation does. `QUALIFICATIONS` remains empty; these receiver records do not permit controller updates, other source versions, or different images. The separate controller authorization is described below.
+1. Keep the receiver connected by USB and open **8BitDo Deck**. If the panel is already open, select **Check for updates**.
+2. Wait for automatic preparation. A matching image and source check enables **Install**; a mismatch leaves it unavailable. Legacy boot geometry is checked after confirmed entry and before erase.
+3. Choose **Install** on that receiver, or **Update all** for the ready devices. Keep USB and power connected until the plugin verifies the returning receiver's version. Check normal controller/receiver operation afterward.
+
+The button click starts the update; automatic preparation does not. To inspect evidence before clicking, open **More options**, then **Firmware details** for the receiver. The desktop app retains its explicit release selection and **Prepare firmware → Review installation → Confirm firmware installation** flow. `QUALIFICATIONS` remains empty; these receiver records do not permit controller updates, other source versions, or different images. The separate controller authorization is described below.
 
 ### Experimental wireless controller update
 
 This route is limited to the Ultimate 2 Wireless controller, stable **1.09 → exact official 1.10**, through an Ultimate 2 receiver running stable **1.06**, with controller edition **1**. Edition is not a reported hardware revision. Preparation fingerprints both components' bootloaders and installed firmware, checks controller battery and commit state, and binds the job to the selected receiver. An older receiver must complete its own eligible USB update first.
 
 1. Connect the receiver to the Deck by USB, directly or through its USB-connected dock. Turn on its paired controller in **2.4 GHz mode** and charge it to at least **30%**. Keep a USB data cable available for recovery.
-2. Scan and select **Ultimate 2 Wireless controller (via receiver)**. Select release **1.10**, then choose **Prepare firmware**. If the controller already runs 1.10, the app reports that no update is needed.
-3. Review the source/destination versions and experimental evidence. Choose **Confirm firmware installation** only for an eligible prepared job.
+2. Open **8BitDo Deck**, or select **Check for updates** if it is already open. Find **Ultimate 2 Wireless controller (via receiver)** and wait for automatic preparation. If the controller already runs the newest listed version, it shows **Up to date**.
+3. Choose **Install** on that controller, or **Update all** for the ready devices. If its receiver needed updating first, wait for that update and the automatic recheck, then click again for the controller.
 4. Keep the controller powered on and the receiver connected until the app verifies the returning controller's version. Check normal controller operation afterward.
+
+In the desktop app, select that controller and release **1.10**, then use **Prepare firmware → Review installation → Confirm firmware installation**.
 
 Other receivers can remain connected; jobs select and lock the original receiver. Each adapter carries one paired controller. Bluetooth and the controller's direct USB connection are not enabled for normal controller installation. The separate USB rescue operation requires its own confirmation before an erase/reinstall. Newly listed catalog firmware does not become installable until its source/image combination is reviewed.
 
@@ -209,10 +220,12 @@ The controller's bounded USB boot round trip passed on 1.10: boot identity and f
 
 For an eligible failed or blocked experimental receiver install, **Check interrupted update** inspects the receiver without changing mode, resetting, or writing firmware. Eligibility requires the same previously attempted job, its recorded original USB port and source version, the unchanged cached destination image, and its authorization still present in the compiled registry. A downloaded image or manually selected device cannot enable recovery.
 
-The permitted action depends on the receiver:
+In Decky, the permitted action depends on the receiver:
 
-- **Ultimate 2 Wireless:** **Confirm receiver recovery** reinspects and resets once if permitted. Reset can make the vendor bootloader finish an already committed image. This does not start another firmware transfer.
-- **Original Ultimate Bluetooth:** **Confirm erase and reinstall** explicitly starts a complete erase and reinstall of the same cached, authorized destination image. The worker rechecks boot target and geometry before writing. This is destructive recovery, not a reset-only operation.
+- **Ultimate 2 Wireless:** **Recover device** reinspects and resets once if permitted. Reset can make the vendor bootloader finish an already committed image. This does not start another firmware transfer.
+- **Original Ultimate Bluetooth:** **Erase and reinstall** explicitly starts a complete erase and reinstall of the same cached, authorized destination image. The worker rechecks boot target and geometry before writing. This is destructive recovery, not a reset-only operation.
+
+The action description states whether recovery finishes an existing update or erases and reinstalls firmware. Selecting the action explicitly confirms it. For an interrupted **Update all** queue, use the failed child job's recovery control; jobs that never started are not recovery targets.
 
 Both actions run under the update/device locks with suspend inhibition and repeat the job, image, authorization, port, and device checks. The original job completes only after the target version returns on the same port. An already installed target can be verified without writing; returning to the original version leaves the update incomplete. There is no automatic retry or boot-mode entry during recovery.
 
@@ -222,7 +235,7 @@ From the CLI, use `eightbitdo check-recovery JOB_ID` for inspection. Read the re
 
 ## State, diagnostics, and removal
 
-Use **Export diagnostics** to save the discovered device information and warnings. The plugin displays the saved path. On Linux, runtime state normally lives in `~/.local/state/eightbitdo-deck/`, or under `$XDG_STATE_HOME/eightbitdo-deck/` if that variable is set. macOS and Windows use the per-user state directory selected by `platformdirs` for `8BitDo Updater`. Desktop and CLI share the default state on each host.
+In Decky, open **More options → Export diagnostics** to save the discovered device information and warnings. The plugin displays the saved path. On Linux, runtime state normally lives in `~/.local/state/eightbitdo-deck/`, or under `$XDG_STATE_HOME/eightbitdo-deck/` if that variable is set. macOS and Windows use the per-user state directory selected by `platformdirs` for `8BitDo Updater`. Desktop and CLI share the default state on each host.
 
 Use Decky's plugin settings to uninstall 8BitDo Deck. Decky removes plugin files; downloaded firmware, diagnostics, and job records can remain in the state directory. Remove those files only after all update jobs have finished.
 

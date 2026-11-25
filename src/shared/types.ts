@@ -31,6 +31,8 @@ export interface Release {
 }
 
 export interface Job {
+  jobs?: Job[];
+  current_job_id?: string;
   id: string;
   state: string;
   progress: number;

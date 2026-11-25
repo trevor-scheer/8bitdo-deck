@@ -19,3 +19,6 @@ export const exportDiagnostics = callable<[], { path?: string; error?: string }>
 export const openOfficialUpdater = callable<[], { opened: boolean; error?: string }>("open_official_updater");
 export const getRecoveryAccess = callable<[], RecoveryAccess>("get_recovery_access");
 export const setupRecoveryAccess = callable<[confirmed: boolean], RecoveryAccess>("setup_recovery_access");
+
+export const installUpdates = callable<[jobIds: string[], confirmed: boolean], Job>("install_updates");
+export const getUpdateQueue = callable<[], Job | null>("get_update_queue");
